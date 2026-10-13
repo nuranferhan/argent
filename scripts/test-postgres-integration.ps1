@@ -42,7 +42,20 @@ try {
 
     Write-Host "Running isolated PostgreSQL ledger integration test (unique temporary schema)."
     & .\gradlew.bat --no-daemon --rerun-tasks :argent-ledger:test --tests com.argent.ledger.PostgresLedgerIntegrationTest
-    if ($LASTEXITCODE -ne 0) { throw "PostgreSQL integration test failed (exit $LASTEXITCODE)." }
+    if ($LASTEXITCODE -ne 0) {
+        $resultFile = Join-Path (Get-Location) "argent-ledger\build\test-results\test\TEST-com.argent.ledger.PostgresLedgerIntegrationTest.xml"
+        if (Test-Path -LiteralPath $resultFile) {
+            try {
+                [xml]$testReport = Get-Content -Raw -LiteralPath $resultFile
+                foreach ($failure in $testReport.SelectNodes("//failure")) {
+                    Write-Host "Test failure: $($failure.GetAttribute('message'))" -ForegroundColor Red
+                }
+            } catch {
+                Write-Warning "Could not read the test XML report: $($_.Exception.Message)"
+            }
+        }
+        throw "PostgreSQL integration test failed (exit $LASTEXITCODE). See argent-ledger\build\reports\tests\test\index.html for details."
+    }
 
     Write-Host "PASS PostgreSQL concurrent holds, post-commit recovery, settlement replay, and ledger invariants."
 } finally {

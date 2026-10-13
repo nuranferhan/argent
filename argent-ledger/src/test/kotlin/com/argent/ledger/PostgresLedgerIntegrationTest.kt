@@ -42,17 +42,27 @@ class PostgresLedgerIntegrationTest {
             }
 
             fun dataSource() = HikariDataSource(HikariConfig().apply {
-                jdbcUrl = url
+                // Use the driver's startup parameter so every physical pooled
+                // connection is pinned to the isolated schema. A SQL SET from
+                // connectionInitSql can be rolled back when autoCommit=false.
+                jdbcUrl = "$url${if ('?' in url) '&' else '?'}currentSchema=$schema"
                 this.username = username
                 this.password = password
                 maximumPoolSize = 16
                 isAutoCommit = false
-                connectionInitSql = "SET search_path TO \"$schema\""
             })
 
             val user = "concurrent-${schema.takeLast(12)}"
             val firstDataSource = dataSource()
             try {
+                firstDataSource.connection.use { connection ->
+                    connection.createStatement().use { statement ->
+                        statement.executeQuery("SELECT current_schema()").use { result ->
+                            assertTrue(result.next())
+                            assertEquals(schema, result.getString(1), "test connections must stay inside the temporary schema")
+                        }
+                    }
+                }
                 val ledger = LedgerService(firstDataSource) { event ->
                     if (event is SettlementCompleted) error("injected post-commit event delivery failure")
                 }.also { it.initSchema() }
@@ -71,7 +81,7 @@ class PostgresLedgerIntegrationTest {
                 assertEquals(BigDecimal.ZERO, ledger.getBalance(user, "TRY").availableBd())
                 assertEquals(BigDecimal("1000"), ledger.getBalance(user, "TRY").heldBd())
                 assertTrue(ledger.verifyInvariant())
-                assertTrue(ledger.verifyReconciliation())
+                assertTrue(ledger.reconciliationReport().ok, ledger.reconciliationReport().toString())
 
                 val buyer = "$user-buyer"
                 val seller = "$user-seller"
@@ -121,7 +131,7 @@ class PostgresLedgerIntegrationTest {
                 assertEquals(BigDecimal("200"), restartedLedger.getBalance(seller, "TRY").availableBd())
                 assertEquals(BigDecimal("3"), restartedLedger.getBalance(seller, "THYAO").availableBd())
                 assertTrue(restartedLedger.verifyInvariant())
-                assertTrue(restartedLedger.verifyReconciliation())
+                assertTrue(restartedLedger.reconciliationReport().ok, restartedLedger.reconciliationReport().toString())
             } finally {
                 restartedDataSource.close()
             }

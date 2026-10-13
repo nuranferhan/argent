@@ -55,10 +55,17 @@ try {
     $headers = @{ Authorization = "Bearer $($login.accessToken)" }
     $reconciliation = Invoke-RestMethod -Uri "$gatewayBaseUrl/api/v1/admin/ledger/reconciliation" -Headers $headers -TimeoutSec 15
     if ($reconciliation.ok -ne $true -or @($reconciliation.mismatches).Count -ne 0) {
+        foreach ($mismatch in @($reconciliation.mismatches)) {
+            Write-Host ("  account={0} asset={1} journalNet={2} balanceTotal={3}" -f `
+                $mismatch.account, $mismatch.asset, $mismatch.journalNet, $mismatch.balanceTotal) -ForegroundColor Red
+        }
         Stop-Check "Ledger reconciliation failed: checked=$($reconciliation.checkedAccountAssets), mismatches=$(@($reconciliation.mismatches).Count)."
     }
     Write-Host "PASS admin ledger reconciliation: $($reconciliation.checkedAccountAssets) account/asset pairs, no mismatches"
 } catch {
+    if ($_.Exception.Message -like "Ledger reconciliation failed:*") {
+        Stop-Check $_.Exception.Message
+    }
     Stop-Check "Could not verify the ADMIN ledger reconciliation endpoint. Check the admin credentials, rate limit, and gateway logs. $($_.Exception.Message)"
 } finally {
     if ($login -and $login.refreshToken) {

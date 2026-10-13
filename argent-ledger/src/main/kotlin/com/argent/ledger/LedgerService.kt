@@ -95,14 +95,30 @@ class LedgerService(
     fun initSchema() {
         val isPostgres = db.vendor.contains("postgres", ignoreCase = true)
         transaction(db) {
-            // Older local databases may already have journal rows without the account column.
-            // Backfill them explicitly before Exposed attempts to add the new NOT NULL column.
+            // Older local databases may already have journal rows with user_id but
+            // without account. Preserve that ownership when adding the account column;
+            // otherwise all historical user postings become invisible to reconciliation.
             if (isPostgres) {
                 exec("""
                     DO ${'$'}${'$'}
                     BEGIN
                         IF to_regclass('journal_entries') IS NOT NULL THEN
                             ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS account VARCHAR(64);
+                            IF EXISTS (
+                                SELECT 1 FROM information_schema.columns
+                                WHERE table_schema = current_schema()
+                                  AND table_name = 'journal_entries'
+                                  AND column_name = 'user_id'
+                            ) THEN
+                                UPDATE journal_entries
+                                SET account = user_id
+                                WHERE account IS NULL AND user_id IS NOT NULL;
+                                -- Repair rows already migrated by older builds that
+                                -- assigned LEGACY_UNASSIGNED before preserving user_id.
+                                UPDATE journal_entries
+                                SET account = user_id
+                                WHERE account = 'LEGACY_UNASSIGNED' AND user_id IS NOT NULL;
+                            END IF;
                             UPDATE journal_entries SET account = 'LEGACY_UNASSIGNED' WHERE account IS NULL;
                             ALTER TABLE journal_entries ALTER COLUMN account SET NOT NULL;
                             IF EXISTS (

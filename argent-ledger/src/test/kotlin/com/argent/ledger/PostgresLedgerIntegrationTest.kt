@@ -38,7 +38,45 @@ class PostgresLedgerIntegrationTest {
 
         try {
             admin.connection.use { connection ->
-                connection.createStatement().use { it.execute("CREATE SCHEMA \"$schema\"") }
+                connection.createStatement().use { statement ->
+                    statement.execute("CREATE SCHEMA \"$schema\"")
+                    statement.execute("""
+                        CREATE TABLE "$schema".balances (
+                            user_id VARCHAR(64) NOT NULL,
+                            asset VARCHAR(32) NOT NULL,
+                            available NUMERIC(36,18) NOT NULL,
+                            held NUMERIC(36,18) NOT NULL,
+                            version BIGINT NOT NULL,
+                            PRIMARY KEY (user_id, asset)
+                        )
+                    """.trimIndent())
+                    statement.execute("""
+                        CREATE TABLE "$schema".journal_entries (
+                            id VARCHAR(64) PRIMARY KEY,
+                            tx_id VARCHAR(64) NOT NULL,
+                            user_id VARCHAR(64),
+                            account VARCHAR(64),
+                            asset VARCHAR(32) NOT NULL,
+                            debit NUMERIC(36,18) NOT NULL,
+                            credit NUMERIC(36,18) NOT NULL,
+                            description VARCHAR(256) NOT NULL,
+                            created_at BIGINT NOT NULL
+                        )
+                    """.trimIndent())
+                    statement.execute("""
+                        INSERT INTO "$schema".balances(user_id, asset, available, held, version)
+                        VALUES ('legacy-user', 'TRY', 100, 0, 0)
+                    """.trimIndent())
+                    // This represents a database already migrated by the older
+                    // code, which assigned LEGACY_UNASSIGNED despite retaining user_id.
+                    statement.execute("""
+                        INSERT INTO "$schema".journal_entries
+                            (id, tx_id, user_id, account, asset, debit, credit, description, created_at)
+                        VALUES
+                            ('legacy-system', 'legacy-deposit', NULL, 'LEGACY_UNASSIGNED', 'TRY', 100, 0, 'legacy custody', 1),
+                            ('legacy-user', 'legacy-deposit', 'legacy-user', 'LEGACY_UNASSIGNED', 'TRY', 0, 100, 'legacy liability', 1)
+                    """.trimIndent())
+                }
             }
 
             fun dataSource() = HikariDataSource(HikariConfig().apply {
@@ -66,6 +104,7 @@ class PostgresLedgerIntegrationTest {
                 val ledger = LedgerService(firstDataSource) { event ->
                     if (event is SettlementCompleted) error("injected post-commit event delivery failure")
                 }.also { it.initSchema() }
+                assertTrue(ledger.reconciliationReport().ok, "legacy journal ownership must be restored from user_id")
                 ledger.deposit(user, "TRY", BigDecimal("1000"), "seed-$schema")
 
                 val holds = runBlocking {

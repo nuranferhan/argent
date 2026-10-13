@@ -1,0 +1,973 @@
+package com.argent.terminal
+
+import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
+import androidx.compose.foundation.border
+import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.heightIn
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
+import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.text.KeyboardOptions
+import androidx.compose.foundation.verticalScroll
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedTextField
+import androidx.compose.material3.OutlinedTextFieldDefaults
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Tab
+import androidx.compose.material3.TabRow
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateListOf
+import androidx.compose.runtime.mutableStateMapOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.rememberCoroutineScope
+import androidx.compose.runtime.setValue
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
+import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.Path
+import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.input.KeyboardType
+import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.window.Window
+import androidx.compose.ui.window.application
+import androidx.compose.ui.window.rememberWindowState
+import com.argent.terminal.api.ArgentApi
+import com.argent.terminal.api.DepthLevelDto
+import com.argent.terminal.api.InstrumentDto
+import com.argent.terminal.api.MeResponse
+import com.argent.terminal.api.OrderBookDto
+import com.argent.terminal.api.OrderDto
+import com.argent.terminal.api.PortfolioDto
+import com.argent.terminal.api.TickerDto
+import com.argent.terminal.api.TradeDto
+import com.argent.terminal.api.TenantDto
+import com.argent.terminal.api.TenantMemberDto
+import com.argent.terminal.api.MarketMakerStateDto
+import com.argent.terminal.ui.ArgentBg
+import com.argent.terminal.ui.ArgentBlue
+import com.argent.terminal.ui.ArgentColors
+import com.argent.terminal.ui.ArgentGold
+import com.argent.terminal.ui.ArgentGreen
+import com.argent.terminal.ui.ArgentGreenDim
+import com.argent.terminal.ui.ArgentLine
+import com.argent.terminal.ui.ArgentMuted
+import com.argent.terminal.ui.ArgentPanel
+import com.argent.terminal.ui.ArgentPanelAlt
+import com.argent.terminal.ui.ArgentRed
+import com.argent.terminal.ui.ArgentRedDim
+import com.argent.terminal.ui.ArgentSilver
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.CancellationException
+import kotlinx.coroutines.launch
+import java.math.BigDecimal
+import java.math.RoundingMode
+import java.util.UUID
+
+fun main() = application {
+    Window(
+        onCloseRequest = ::exitApplication,
+        title = "ARGENT — Multi-Asset Trading Terminal",
+        state = rememberWindowState(width = 1560.dp, height = 940.dp)
+    ) {
+        MaterialTheme(colorScheme = ArgentColors) {
+            Surface(modifier = Modifier.fillMaxSize(), color = ArgentBg) {
+                App()
+            }
+        }
+    }
+}
+
+@Composable
+private fun App() {
+    val api = remember { ArgentApi() }
+    var me by remember { mutableStateOf<MeResponse?>(null) }
+    if (me == null) {
+        LoginPane(api) { me = it }
+    } else {
+        TradingDesk(api, me!!, onLogout = { me = null }, onMeChanged = { me = it })
+    }
+}
+
+@Composable
+private fun LoginPane(api: ArgentApi, onAuthed: (MeResponse) -> Unit) {
+    val scope = rememberCoroutineScope()
+    var host by remember { mutableStateOf("http://127.0.0.1:8080") }
+    var email by remember { mutableStateOf(System.getenv("BOOTSTRAP_ADMIN_EMAIL").orEmpty()) }
+    var password by remember { mutableStateOf("") }
+    var name by remember { mutableStateOf("Admin") }
+    var invitationToken by remember { mutableStateOf("") }
+    var error by remember { mutableStateOf<String?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    var mode by remember { mutableStateOf("login") }
+
+    Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
+        Column(
+            Modifier.width(460.dp)
+                .background(ArgentPanel, RoundedCornerShape(14.dp))
+                .border(1.dp, ArgentLine, RoundedCornerShape(14.dp))
+                .padding(32.dp),
+            verticalArrangement = Arrangement.spacedBy(12.dp)
+        ) {
+            Text("ARGENT", color = ArgentGold, fontSize = 32.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+            Text("Multi-Asset Trading & Settlement Platform", color = ArgentMuted, fontSize = 13.sp)
+            Text("ARGENT gateway hesabınla oturum aç veya çalışma alanı davetini kabul et.", color = ArgentMuted, fontSize = 12.sp)
+            field("Gateway", host) { host = it }
+            field("E-posta", email) { email = it }
+            OutlinedTextField(
+                value = password,
+                onValueChange = { password = it },
+                label = { Text("Şifre") },
+                visualTransformation = PasswordVisualTransformation(),
+                modifier = Modifier.fillMaxWidth(),
+                colors = fieldColors()
+            )
+            if (mode != "login") {
+                Text("Yeni hesap şifresi en az 12 karakter olmalıdır.", color = ArgentMuted, fontSize = 11.sp)
+            }
+            if (mode != "login") field("Görünen ad", name) { name = it }
+            if (mode == "invitation") field("Davet kodu", invitationToken) { invitationToken = it }
+            error?.let { Text(it, color = ArgentRed, fontSize = 12.sp) }
+            Button(
+                enabled = !busy,
+                onClick = {
+                    busy = true
+                    error = null
+                    api.baseUrl = host.trimEnd('/')
+                    scope.launch {
+                        try {
+                            when (mode) {
+                                "register" -> {
+                                    api.register(email, password, name.ifBlank { email.substringBefore("@") })
+                                    api.login(email, password)
+                                }
+                                "invitation" -> api.registerFromInvitation(
+                                    email, password, name.ifBlank { email.substringBefore("@") }, invitationToken.trim()
+                                )
+                                else -> api.login(email, password)
+                            }
+                            onAuthed(api.me())
+                        } catch (cancelled: CancellationException) {
+                            throw cancelled
+                        } catch (failure: Exception) {
+                            error = failure.message
+                        } finally {
+                            password = ""
+                            busy = false
+                        }
+                    }
+                },
+                modifier = Modifier.fillMaxWidth().height(46.dp),
+                colors = ButtonDefaults.buttonColors(containerColor = ArgentGold, contentColor = Color(0xFF111111))
+            ) { Text(when (mode) { "login" -> "Giriş"; "invitation" -> "Daveti kabul et"; else -> "Kayıt ol ve giriş" }, fontWeight = FontWeight.Bold) }
+            if (mode != "invitation") TextButton(onClick = { mode = if (mode == "login") "register" else "login" }) {
+                Text(if (mode == "login") "Geliştirme kaydı" else "Giriş ekranına dön", color = ArgentBlue)
+            }
+            TextButton(onClick = { mode = if (mode == "invitation") "login" else "invitation" }) {
+                Text(if (mode == "invitation") "Giriş ekranına dön" else "Davet koduyla katıl", color = ArgentBlue)
+            }
+        }
+    }
+}
+
+@Composable
+private fun TradingDesk(api: ArgentApi, me: MeResponse, onLogout: () -> Unit, onMeChanged: (MeResponse) -> Unit) {
+    val scope = rememberCoroutineScope()
+    var instruments by remember { mutableStateOf(listOf<InstrumentDto>()) }
+    var symbol by remember { mutableStateOf("THYAO") }
+    var book by remember { mutableStateOf(OrderBookDto(symbol)) }
+    val tickers = remember { mutableStateMapOf<String, TickerDto>() }
+    val chart = remember { mutableStateListOf<Float>() }
+    var portfolio by remember { mutableStateOf<PortfolioDto?>(null) }
+    var orders by remember { mutableStateOf(listOf<OrderDto>()) }
+    var fills by remember { mutableStateOf(listOf<TradeDto>()) }
+    var blotter by remember { mutableStateOf(listOf<TradeDto>()) }
+    var tab by remember { mutableStateOf(0) }
+    var side by remember { mutableStateOf("BUY") }
+    var type by remember { mutableStateOf("LIMIT") }
+    var price by remember { mutableStateOf("") }
+    var qty by remember { mutableStateOf("10") }
+    var flash by remember { mutableStateOf<String?>(null) }
+    var health by remember { mutableStateOf("…") }
+    var orderSubmitting by remember { mutableStateOf(false) }
+    var orderRequestFingerprint by remember { mutableStateOf<String?>(null) }
+    var orderRequestId by remember { mutableStateOf(UUID.randomUUID().toString()) }
+
+    LaunchedEffect(Unit) {
+        runCatching { instruments = api.instruments() }
+        launch {
+            api.tickerFlow().collect { t ->
+                tickers[t.symbol] = t
+                if (t.symbol == symbol) {
+                    chart.add(t.price.toFloatOrNull() ?: return@collect)
+                    if (chart.size > 220) chart.removeAt(0)
+                }
+            }
+        }
+    }
+    LaunchedEffect(symbol) {
+        chart.clear()
+        runCatching { api.history(symbol).forEach { it.price.toFloatOrNull()?.let(chart::add) } }
+        launch { api.orderBookFlow(symbol).collect { book = it } }
+    }
+    LaunchedEffect(book.bestBid, book.bestAsk, side, type) {
+        if (type == "MARKET") return@LaunchedEffect
+        if (price.isNotBlank()) return@LaunchedEffect
+        price = if (side == "BUY") book.bestAsk ?: book.bestBid ?: price else book.bestBid ?: book.bestAsk ?: price
+    }
+    LaunchedEffect(me) {
+        while (true) {
+            runCatching {
+                portfolio = api.portfolio()
+                orders = api.orders()
+                fills = api.fills()
+                blotter = api.publicTrades(symbol)
+                val h = api.health()
+                health = if (h.status == "UP") buildString {
+                    append("INFRA OK · ")
+                    append(if (h.matchingEngine) "ENGINE OK" else "ENGINE PAUSED")
+                    append(" · ")
+                    append(h.executionMode.replace('_', ' '))
+                    append(" · CRYPTO ")
+                    append(h.cryptoMarketData)
+                    append(" · BIST ")
+                    append(h.bistMarketData)
+                } else buildString {
+                    append("INFRA DEGRADED")
+                    if (!h.postgres) append(" · DB")
+                    if (!h.redis) append(" · REDIS")
+                    if (!h.rabbit) append(" · MQ")
+                    if (!h.invariantOk) append(" · LEDGER")
+                    if (!h.matchingEngine) append(" · ENGINE PAUSED")
+                }
+            }.onFailure { health = "GATEWAY DOWN" }
+            delay(1_000)
+        }
+    }
+
+    Column(Modifier.fillMaxSize().background(ArgentBg)) {
+        TopBar(
+            me, tickers, health, onLogout, api, scope,
+            onFlash = { flash = it },
+            onMeChanged = onMeChanged,
+            onWorkspaceClosed = onLogout
+        )
+        flash?.let {
+            Text(
+                it,
+                color = if (it.contains("REJECTED", true) || it.contains("hata", true)) ArgentRed else ArgentGold,
+                modifier = Modifier.padding(horizontal = 16.dp, vertical = 6.dp),
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace
+            )
+        }
+        Row(Modifier.weight(1f).fillMaxWidth()) {
+            Watchlist(instruments, tickers, symbol) { symbol = it; price = "" }
+            Column(Modifier.weight(1f).fillMaxHeight()) {
+                ChartPanel(symbol, tickers[symbol], chart, book)
+                OrderBookPanel(book) { clicked -> price = clicked }
+            }
+            Ticket(
+                symbol = symbol,
+                instrument = instruments.firstOrNull { it.symbol == symbol },
+                ticker = tickers[symbol],
+                side = side,
+                type = type,
+                price = price,
+                qty = qty,
+                submitting = orderSubmitting,
+                onSide = { side = it; price = "" },
+                onType = {
+                    type = it
+                    if (it == "MARKET") price = ""
+                },
+                onPrice = { price = it },
+                onQty = { qty = it },
+                onSubmit = {
+                    val fingerprint = listOf(symbol, side, type, price, qty).joinToString("|")
+                    if (fingerprint != orderRequestFingerprint) {
+                        orderRequestFingerprint = fingerprint
+                        orderRequestId = UUID.randomUUID().toString()
+                    }
+                    val idempotencyKey = orderRequestId
+                    orderSubmitting = true
+                    scope.launch {
+                        try {
+                            val result = api.placeOrder(symbol, side, type, qty, price.ifBlank { null }, idempotencyKey)
+                            flash = "${result.status}  filled=${result.filledQuantity}  ${result.reason}".trim()
+                            portfolio = api.portfolio()
+                            orders = api.orders()
+                            orderRequestFingerprint = null
+                            orderRequestId = UUID.randomUUID().toString()
+                        } catch (error: Exception) {
+                            flash = error.message ?: "Emir gönderilemedi; aynı emir anahtarıyla yeniden deneyebilirsin."
+                        } finally {
+                            orderSubmitting = false
+                        }
+                    }
+                }
+            )
+        }
+        BottomDock(tab, { tab = it }, portfolio, orders, fills, blotter, tickers, api, me, scope) { flash = it }
+    }
+}
+
+@Composable
+private fun TopBar(
+    me: MeResponse,
+    tickers: Map<String, TickerDto>,
+    health: String,
+    onLogout: () -> Unit,
+    api: ArgentApi,
+    scope: kotlinx.coroutines.CoroutineScope,
+    onFlash: (String) -> Unit,
+    onMeChanged: (MeResponse) -> Unit,
+    onWorkspaceClosed: () -> Unit
+) {
+    var workspaceOpen by remember { mutableStateOf(false) }
+    Row(
+        Modifier.fillMaxWidth().heightIn(min = 56.dp).background(ArgentPanel).padding(horizontal = 16.dp, vertical = 8.dp),
+        verticalAlignment = Alignment.CenterVertically
+    ) {
+        Text("ARGENT", color = ArgentGold, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 18.sp, maxLines = 1, softWrap = false)
+        Spacer(Modifier.width(20.dp))
+        LazyRow(
+            Modifier.weight(1f).heightIn(min = 28.dp),
+            horizontalArrangement = Arrangement.spacedBy(14.dp),
+            verticalAlignment = Alignment.CenterVertically
+        ) {
+            items(tickers.values.sortedBy { it.symbol }.take(8), key = { it.symbol }) { t ->
+                Text(
+                    "${t.symbol} ${compact(t.price)}",
+                    color = ArgentSilver,
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    maxLines = 1,
+                    softWrap = false
+                )
+            }
+        }
+        val ok = health.startsWith("INFRA OK")
+        Box(
+            Modifier.widthIn(max = 260.dp)
+                .background(if (ok) ArgentGreenDim else ArgentRedDim, RoundedCornerShape(4.dp))
+                .padding(horizontal = 8.dp, vertical = 4.dp)
+        ) {
+            Text(
+                health,
+                color = if (ok) ArgentGreen else ArgentRed,
+                fontSize = 11.sp,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                softWrap = false,
+                overflow = TextOverflow.Ellipsis
+            )
+        }
+        Spacer(Modifier.width(12.dp))
+        Text(
+            "${me.displayName} · ${me.role}",
+            color = ArgentMuted,
+            fontSize = 12.sp,
+            maxLines = 1,
+            softWrap = false,
+            overflow = TextOverflow.Ellipsis
+        )
+        TextButton(onClick = { workspaceOpen = true }) { Text("Çalışma alanı", color = ArgentGold) }
+        TextButton(onClick = {
+            scope.launch {
+                api.logout()
+                onLogout()
+            }
+        }) { Text("Çıkış", color = ArgentRed) }
+    }
+    if (workspaceOpen) WorkspaceDialog(
+        api = api,
+        me = me,
+        scope = scope,
+        onClose = { workspaceOpen = false },
+        onFlash = onFlash,
+        onMeChanged = onMeChanged,
+        onWorkspaceClosed = onWorkspaceClosed
+    )
+}
+
+@Composable
+private fun WorkspaceDialog(
+    api: ArgentApi,
+    me: MeResponse,
+    scope: kotlinx.coroutines.CoroutineScope,
+    onClose: () -> Unit,
+    onFlash: (String) -> Unit,
+    onMeChanged: (MeResponse) -> Unit,
+    onWorkspaceClosed: () -> Unit
+) {
+    var tenants by remember { mutableStateOf(emptyList<TenantDto>()) }
+    var members by remember { mutableStateOf(emptyList<TenantMemberDto>()) }
+    var inviteEmail by remember { mutableStateOf("") }
+    var inviteRole by remember { mutableStateOf("TRADER") }
+    var inviteToken by remember { mutableStateOf("") }
+    var acceptToken by remember { mutableStateOf("") }
+    var acceptingInvitation by remember { mutableStateOf(false) }
+    var error by remember { mutableStateOf<String?>(null) }
+    var closing by remember { mutableStateOf(false) }
+    var marketMaker by remember { mutableStateOf<MarketMakerStateDto?>(null) }
+    val canManage = me.tenantRole == "OWNER" || me.tenantRole == "ADMIN"
+
+    LaunchedEffect(me.tenantId) {
+        tenants = runCatching { api.tenants() }.getOrDefault(emptyList())
+        if (canManage) members = runCatching { api.tenantMembers() }.getOrDefault(emptyList())
+        if (me.role == "ADMIN") marketMaker = runCatching { api.marketMakerState() }.getOrNull()
+    }
+    fun runAction(action: suspend () -> Unit) {
+        scope.launch {
+            error = null
+            try { action() } catch (failure: Exception) { error = failure.message ?: "İşlem başarısız" }
+        }
+    }
+    AlertDialog(
+        onDismissRequest = onClose,
+        title = { Text("Çalışma alanı", color = ArgentGold) },
+        text = {
+            Column(
+                Modifier.width(600.dp).heightIn(max = 620.dp).verticalScroll(rememberScrollState()),
+                verticalArrangement = Arrangement.spacedBy(8.dp)
+            ) {
+                Text("Aktif rol: ${me.tenantRole}", color = ArgentMuted, fontSize = 12.sp)
+                if (me.role == "ADMIN") {
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            marketMaker?.let { "Market maker ${if (it.enabled) "AÇIK" else "KAPALI"} · emir üst sınırı ${it.quoteNotionalCap} · stok sınırı ${it.inventoryNotionalCap}" }
+                                ?: "Market maker durumu kullanılamıyor",
+                            Modifier.weight(1f), color = ArgentMuted, fontSize = 11.sp
+                        )
+                        if (marketMaker != null) TextButton(onClick = {
+                            runAction {
+                                if (marketMaker!!.enabled) api.killMarketMaker() else api.resumeMarketMaker()
+                                marketMaker = api.marketMakerState()
+                            }
+                        }) { Text(if (marketMaker!!.enabled) "KILL SWITCH" else "Yeniden başlat", color = if (marketMaker!!.enabled) ArgentRed else ArgentGreen) }
+                    }
+                }
+                tenants.forEach { tenant ->
+                    Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                        Text("${tenant.tenantName} · ${tenant.role}", Modifier.weight(1f), color = ArgentSilver)
+                        if (tenant.tenantId != me.tenantId) TextButton(onClick = {
+                            runAction { api.switchTenant(tenant.tenantId); onMeChanged(api.me()) }
+                        }) { Text("Geçiş yap", color = ArgentBlue) }
+                    }
+                }
+                if (canManage) {
+                    Text("Üyeler", color = ArgentGold, fontWeight = FontWeight.Bold)
+                    members.forEach { member ->
+                        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+                            Text("${member.displayName} · ${member.email} · ${member.role}", Modifier.weight(1f), color = ArgentSilver, fontSize = 11.sp)
+                            val mayManageMember = member.role != "OWNER" && member.userId != me.userId &&
+                                (me.tenantRole == "OWNER" || member.role != "ADMIN")
+                            if (mayManageMember) {
+                                TextButton(onClick = {
+                                    val nextRole = when (member.role) {
+                                        "VIEWER" -> "TRADER"
+                                        "TRADER" -> if (me.tenantRole == "OWNER") "ADMIN" else "VIEWER"
+                                        else -> "VIEWER"
+                                    }
+                                    runAction {
+                                        api.updateTenantMemberRole(member.userId, nextRole)
+                                        members = api.tenantMembers()
+                                    }
+                                }) { Text("Rolü değiştir", color = ArgentBlue) }
+                                TextButton(onClick = {
+                                    runAction {
+                                        api.removeTenantMember(member.userId)
+                                        members = api.tenantMembers()
+                                    }
+                                }) { Text("Çıkar", color = ArgentRed) }
+                            }
+                        }
+                    }
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        OutlinedTextField(inviteEmail, { inviteEmail = it }, label = { Text("Davet e-postası") }, modifier = Modifier.weight(1f), singleLine = true, colors = fieldColors())
+                        TextButton(onClick = {
+                            inviteRole = when (inviteRole) {
+                                "TRADER" -> if (me.tenantRole == "OWNER") "ADMIN" else "VIEWER"
+                                "VIEWER" -> "TRADER"
+                                else -> "VIEWER"
+                            }
+                        }) { Text(inviteRole, color = ArgentGold) }
+                        Button(onClick = {
+                            runAction {
+                                inviteToken = api.inviteTenantMember(inviteEmail, inviteRole).token
+                                inviteEmail = ""
+                            }
+                        }) { Text("Davet oluştur") }
+                    }
+                    if (inviteToken.isNotBlank()) Text("Davet kodu (tek sefer gösterilir): $inviteToken", color = ArgentGold, fontSize = 11.sp)
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    OutlinedTextField(acceptToken, { acceptToken = it }, label = { Text("Mevcut kullanıcı için davet kodu") }, modifier = Modifier.weight(1f), singleLine = true, colors = fieldColors())
+                    Button(enabled = !acceptingInvitation, onClick = {
+                        acceptingInvitation = true
+                        runAction {
+                            try {
+                                val membership = api.acceptTenantInvitation(acceptToken.trim())
+                                acceptToken = ""
+                                tenants = api.tenants()
+                                onFlash("Çalışma alanına katıldın · ${membership.role}")
+                            } finally {
+                                acceptingInvitation = false
+                            }
+                        }
+                    }) { Text(if (acceptingInvitation) "Kabul ediliyor…" else "Kabul et") }
+                }
+                error?.let { Text(it, color = ArgentRed, fontSize = 12.sp) }
+                if (me.tenantRole == "OWNER") TextButton(onClick = { closing = true }) {
+                    Text("Bu çalışma alanını kapat", color = ArgentRed)
+                }
+            }
+        },
+        confirmButton = { TextButton(onClick = onClose) { Text("Kapat") } }
+    )
+    if (closing) AlertDialog(
+        onDismissRequest = { closing = false },
+        title = { Text("Çalışma alanı kapatılsın mı?") },
+        text = { Text("Bu işlem oturumları sonlandırır. Diğer üyeler önce çıkarılmalı; açık emirler kapatma sırasında iptal edilir.") },
+        confirmButton = {
+            TextButton(onClick = {
+                closing = false
+                runAction { api.closeWorkspace(); onWorkspaceClosed() }
+            }) { Text("Kapat", color = ArgentRed) }
+        },
+        dismissButton = { TextButton(onClick = { closing = false }) { Text("Vazgeç") } }
+    )
+}
+
+@Composable
+private fun Watchlist(
+    instruments: List<InstrumentDto>,
+    tickers: Map<String, TickerDto>,
+    selected: String,
+    onSelect: (String) -> Unit
+) {
+    if (instruments.isEmpty()) {
+        Column(Modifier.fillMaxSize().background(ArgentPanel).padding(10.dp)) {
+            Text("PİYASALAR", color = ArgentMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+            Spacer(Modifier.height(10.dp))
+            Text("Enstrüman verisi bekleniyor veya gateway'e ulaşılamıyor.", color = ArgentMuted, fontSize = 11.sp)
+        }
+        return
+    }
+    Column(Modifier.width(228.dp).fillMaxHeight().background(ArgentPanel).padding(10.dp)) {
+        Text("PİYASALAR", color = ArgentMuted, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Spacer(Modifier.height(8.dp))
+        LazyColumn {
+            items(instruments) { ins ->
+                val px = tickers[ins.symbol]?.price ?: "—"
+                val bg = if (ins.symbol == selected) ArgentPanelAlt else Color.Transparent
+                Row(
+                    Modifier.fillMaxWidth().background(bg, RoundedCornerShape(6.dp)).clickable { onSelect(ins.symbol) }.padding(8.dp),
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Column {
+                        Text(ins.symbol, color = ArgentSilver, fontWeight = FontWeight.SemiBold, fontSize = 13.sp)
+                        Text(ins.assetClass, color = ArgentMuted, fontSize = 10.sp)
+                    }
+                    Text(compact(px), color = ArgentGold, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun ChartPanel(symbol: String, ticker: TickerDto?, points: List<Float>, book: OrderBookDto) {
+    val change = if (points.size >= 2) points.last() - points.first() else 0f
+    val changePct = if (points.size >= 2 && points.first() != 0f) change / points.first() * 100f else 0f
+    Column(
+        Modifier.fillMaxWidth().height(360.dp).padding(8.dp).background(ArgentPanel, RoundedCornerShape(8.dp)).padding(12.dp)
+    ) {
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text(symbol, color = ArgentSilver, fontWeight = FontWeight.Bold, fontSize = 20.sp)
+            Spacer(Modifier.width(12.dp))
+            Text(ticker?.price ?: "—", color = ArgentGold, fontFamily = FontFamily.Monospace, fontSize = 24.sp)
+            Spacer(Modifier.width(12.dp))
+            Text(
+                (if (changePct >= 0) "+" else "") + String.format("%.2f%%", changePct),
+                color = if (changePct >= 0) ArgentGreen else ArgentRed,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 13.sp
+            )
+            Spacer(Modifier.width(16.dp))
+            Text("bid ${book.bestBid ?: ticker?.bid ?: "—"}   ask ${book.bestAsk ?: ticker?.ask ?: "—"}", color = ArgentMuted, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
+        }
+        Spacer(Modifier.height(8.dp))
+        Canvas(Modifier.fillMaxSize()) {
+            if (points.size < 2) return@Canvas
+            val min = points.min()
+            val max = points.max().coerceAtLeast(min + 0.0001f)
+            repeat(4) { i ->
+                val y = size.height * i / 3f
+                drawLine(ArgentLine.copy(alpha = 0.55f), Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+            }
+            val path = Path()
+            val fill = Path()
+            points.forEachIndexed { i, v ->
+                val x = size.width * i / (points.size - 1).coerceAtLeast(1)
+                val y = size.height - ((v - min) / (max - min) * size.height)
+                if (i == 0) {
+                    path.moveTo(x, y)
+                    fill.moveTo(x, size.height)
+                    fill.lineTo(x, y)
+                } else {
+                    path.lineTo(x, y)
+                    fill.lineTo(x, y)
+                }
+            }
+            fill.lineTo(size.width, size.height)
+            fill.close()
+            drawPath(fill, Brush.verticalGradient(listOf(ArgentGold.copy(alpha = 0.28f), Color.Transparent)))
+            drawPath(path, ArgentGold, style = Stroke(width = 2.4f))
+        }
+    }
+}
+
+@Composable
+private fun OrderBookPanel(book: OrderBookDto, onPrice: (String) -> Unit) {
+    val maxQty = (book.bids + book.asks).maxOfOrNull { it.quantity.toFloatOrNull() ?: 0f } ?: 1f
+    Row(Modifier.fillMaxWidth().height(300.dp).padding(8.dp)) {
+        BookSide("ALIŞ", book.bids, ArgentGreen, ArgentGreenDim, maxQty, Modifier.weight(1f), onPrice)
+        Column(
+            Modifier.width(88.dp).fillMaxHeight().padding(horizontal = 6.dp),
+            verticalArrangement = Arrangement.Center,
+            horizontalAlignment = Alignment.CenterHorizontally
+        ) {
+            Text("SPREAD", color = ArgentMuted, fontSize = 10.sp)
+            Text(spread(book), color = ArgentGold, fontFamily = FontFamily.Monospace, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+        }
+        BookSide("SATIŞ", book.asks, ArgentRed, ArgentRedDim, maxQty, Modifier.weight(1f), onPrice)
+    }
+}
+
+@Composable
+private fun BookSide(
+    title: String,
+    levels: List<DepthLevelDto>,
+    color: Color,
+    bar: Color,
+    maxQty: Float,
+    modifier: Modifier,
+    onPrice: (String) -> Unit
+) {
+    Column(modifier.background(ArgentPanel, RoundedCornerShape(8.dp)).padding(10.dp)) {
+        Text(title, color = color, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+        Row(Modifier.fillMaxWidth()) {
+            Text("Fiyat", color = ArgentMuted, fontSize = 10.sp, modifier = Modifier.weight(1f))
+            Text("Miktar", color = ArgentMuted, fontSize = 10.sp, modifier = Modifier.weight(1f))
+            Text("#", color = ArgentMuted, fontSize = 10.sp, modifier = Modifier.width(28.dp))
+        }
+        LazyColumn {
+            items(levels) { lvl ->
+                val frac = ((lvl.quantity.toFloatOrNull() ?: 0f) / maxQty.coerceAtLeast(0.0001f)).coerceIn(0f, 1f)
+                Box(Modifier.fillMaxWidth().clickable { onPrice(lvl.price) }.padding(vertical = 1.dp)) {
+                    Canvas(Modifier.matchParentSize()) {
+                        drawRect(bar, topLeft = Offset(size.width * (1f - frac), 0f), size = Size(size.width * frac, size.height))
+                    }
+                    Row(Modifier.fillMaxWidth().padding(vertical = 3.dp, horizontal = 2.dp)) {
+                        Text(lvl.price, color = color, fontFamily = FontFamily.Monospace, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                        Text(compact(lvl.quantity), color = ArgentSilver, fontFamily = FontFamily.Monospace, fontSize = 12.sp, modifier = Modifier.weight(1f))
+                        Text(lvl.orderCount.toString(), color = ArgentMuted, fontSize = 12.sp, modifier = Modifier.width(28.dp))
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun Ticket(
+    symbol: String,
+    instrument: InstrumentDto?,
+    ticker: TickerDto?,
+    side: String,
+    type: String,
+    price: String,
+    qty: String,
+    submitting: Boolean,
+    onSide: (String) -> Unit,
+    onType: (String) -> Unit,
+    onPrice: (String) -> Unit,
+    onQty: (String) -> Unit,
+    onSubmit: () -> Unit
+) {
+    val quantityValue = qty.toBigDecimalOrNull()
+    val priceValue = price.toBigDecimalOrNull()
+    val lotSize = instrument?.lotSize?.toBigDecimalOrNull()
+    val tickSize = instrument?.tickSize?.toBigDecimalOrNull()
+    val validationMessage = when {
+        instrument == null -> "Enstrüman bilgisi yükleniyor."
+        quantityValue == null || quantityValue.signum() <= 0 -> "Miktar pozitif bir sayı olmalı."
+        lotSize != null && quantityValue.remainder(lotSize).signum() != 0 -> "Miktar lot adımına uygun değil (${instrument.lotSize})."
+        type == "MARKET" && ticker?.price == null -> "Piyasa fiyatı henüz alınmadı."
+        type != "MARKET" && (priceValue == null || priceValue.signum() <= 0) -> "Fiyat pozitif bir sayı olmalı."
+        type != "MARKET" && tickSize != null && priceValue!!.remainder(tickSize).signum() != 0 -> "Fiyat tick adımına uygun değil (${instrument.tickSize})."
+        else -> null
+    }
+    val notional = runCatching {
+        val px = if (type == "MARKET") ticker?.price ?: "0" else price.ifBlank { "0" }
+        BigDecimal(px).multiply(BigDecimal(qty.ifBlank { "0" })).setScale(2, RoundingMode.HALF_UP).toPlainString()
+    }.getOrElse { "—" }
+    Column(
+        Modifier.width(300.dp).fillMaxHeight().background(ArgentPanel).padding(14.dp),
+        verticalArrangement = Arrangement.spacedBy(8.dp)
+    ) {
+        Text("EMİR  $symbol", color = ArgentSilver, fontWeight = FontWeight.Bold)
+        instrument?.let { Text("${it.displayName}  tick ${it.tickSize}  lot ${it.lotSize}", color = ArgentMuted, fontSize = 11.sp) }
+        Row {
+            Chip("AL", side == "BUY", ArgentGreen) { onSide("BUY") }
+            Spacer(Modifier.width(8.dp))
+            Chip("SAT", side == "SELL", ArgentRed) { onSide("SELL") }
+        }
+        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+            listOf("LIMIT", "MARKET", "IOC", "FOK").forEach { t ->
+                Chip(t, type == t, ArgentGold) { onType(t) }
+            }
+        }
+        if (type != "MARKET") field("Fiyat", price, KeyboardType.Decimal, onPrice)
+        field("Miktar", qty, KeyboardType.Decimal, onQty)
+        Text("Tahmini notional  $notional", color = ArgentMuted, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
+        validationMessage?.let { Text(it, color = ArgentRed, fontSize = 11.sp) }
+        Spacer(Modifier.height(4.dp))
+        Button(
+            onClick = onSubmit,
+            enabled = !submitting && validationMessage == null,
+            modifier = Modifier.fillMaxWidth().height(46.dp),
+            colors = ButtonDefaults.buttonColors(
+                containerColor = if (side == "BUY") ArgentGreen else ArgentRed,
+                contentColor = Color.White
+            )
+        ) { Text(if (submitting) "GÖNDERİLİYOR…" else if (side == "BUY") "ALIŞ EMRİ" else "SATIŞ EMRİ", fontWeight = FontWeight.Bold) }
+        Text(
+            "Limit deftere yazılır. Market/IOC kalanı iptal eder. FOK tamamen dolmazsa işlem açılmaz. Fiyata tıklayınca bilet dolar.",
+            color = ArgentMuted,
+            fontSize = 11.sp
+        )
+    }
+}
+
+@Composable
+private fun BottomDock(
+    tab: Int,
+    onTab: (Int) -> Unit,
+    portfolio: PortfolioDto?,
+    orders: List<OrderDto>,
+    fills: List<TradeDto>,
+    blotter: List<TradeDto>,
+    tickers: Map<String, TickerDto>,
+    api: ArgentApi,
+    me: MeResponse,
+    scope: kotlinx.coroutines.CoroutineScope,
+    onFlash: (String) -> Unit
+) {
+    Column(Modifier.fillMaxWidth().height(268.dp).background(ArgentPanelAlt)) {
+        TabRow(selectedTabIndex = tab, containerColor = ArgentPanel, contentColor = ArgentGold) {
+            listOf("Portföy", "Açık emirler", "İşlemlerim", "Piyasa işleri").forEachIndexed { i, t ->
+                Tab(selected = tab == i, onClick = { onTab(i) }, text = { Text(t, fontSize = 12.sp) })
+            }
+        }
+        when (tab) {
+            0 -> PortfolioTab(portfolio, tickers)
+            1 -> OrdersTab(orders, api, scope, onFlash)
+            2 -> TradesTab(fills)
+            else -> TradesTab(blotter)
+        }
+    }
+}
+
+@Composable
+private fun PortfolioTab(
+    p: PortfolioDto?,
+    tickers: Map<String, TickerDto>
+) {
+    if (p == null) {
+        Text("Yükleniyor…", color = ArgentMuted, modifier = Modifier.padding(12.dp))
+        return
+    }
+    Column(Modifier.padding(12.dp).verticalScroll(rememberScrollState())) {
+        Row(horizontalArrangement = Arrangement.spacedBy(22.dp)) {
+            Metric("Risk skoru", p.riskScore.toString())
+            Text("Spot işlem · kaldıraç/marjin kapalı", color = ArgentMuted, fontSize = 11.sp)
+        }
+        p.valuations.forEach { value ->
+            Spacer(Modifier.height(8.dp))
+            Text("${value.quoteAsset} değerlemesi", color = ArgentGold, fontWeight = FontWeight.SemiBold)
+            Row(horizontalArrangement = Arrangement.spacedBy(22.dp)) {
+                Metric("Özkaynak", "${compact(value.equity)} ${value.quoteAsset}")
+                Metric("Gerçekleşen PnL", "${compact(value.realizedPnl)} ${value.quoteAsset}", value.realizedPnl.startsWith("-"))
+                Metric("Açık PnL", "${compact(value.unrealizedPnl)} ${value.quoteAsset}", value.unrealizedPnl.startsWith("-"))
+                Metric("Brüt maruziyet", "${compact(value.grossExposure)} ${value.quoteAsset}")
+            }
+            if (!value.priceComplete) {
+                Text("Güncel fiyatı olmayan varlıklar maliyet bazlı değerlenir; özkaynak kısmi tahmindir.", color = ArgentRed, fontSize = 11.sp)
+            }
+            if (!value.pnlComplete) {
+                Text("Başlangıç bakiyelerinin maliyet temeli bilinmediği için PnL eksik olabilir.", color = ArgentRed, fontSize = 11.sp)
+            }
+        }
+        if (p.valuations.isEmpty()) Text("Değerleme için bakiye veya pozisyon yok.", color = ArgentMuted, fontSize = 11.sp)
+        Spacer(Modifier.height(10.dp))
+        Row {
+            Column(Modifier.weight(1f)) {
+                Text("Bakiyeler", color = ArgentMuted, fontSize = 11.sp)
+                p.balances.forEach { b ->
+                    Text("${b.asset}  serbest ${compact(b.available)}  bloke ${compact(b.held)}", color = ArgentSilver, fontFamily = FontFamily.Monospace, fontSize = 12.sp)
+                }
+            }
+            Column(Modifier.weight(1f)) {
+                Text("Pozisyonlar", color = ArgentMuted, fontSize = 11.sp)
+                p.positions.forEach { pos ->
+                    val mark = tickers[pos.symbol]?.price ?: pos.avgEntryPrice
+                    Text(
+                        "${pos.symbol}  qty ${compact(pos.quantity)}  avg ${compact(pos.avgEntryPrice)}  mark ${compact(mark)}  rPnL ${compact(pos.realizedPnl)}",
+                        color = ArgentSilver,
+                        fontFamily = FontFamily.Monospace,
+                        fontSize = 12.sp
+                    )
+                }
+            }
+        }
+        Spacer(Modifier.height(10.dp))
+        Text("Para yatırma ve çekme, doğrulanmış ödeme/saklama sağlayıcısı bağlandığında etkinleştirilir.", color = ArgentMuted, fontSize = 11.sp)
+    }
+}
+
+@Composable
+private fun OrdersTab(
+    orders: List<OrderDto>,
+    api: ArgentApi,
+    scope: kotlinx.coroutines.CoroutineScope,
+    onFlash: (String) -> Unit
+) {
+    if (orders.isEmpty()) {
+        Text("Açık veya geçmiş emir yok.", color = ArgentMuted, modifier = Modifier.padding(12.dp), fontSize = 12.sp)
+        return
+    }
+    LazyColumn(Modifier.padding(8.dp)) {
+        items(orders) { o ->
+            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Text(
+                    "${o.symbol} ${o.side} ${o.type} ${compact(o.quantity)}@${o.price ?: "MKT"}  ${o.status}  filled ${compact(o.filledQuantity)}",
+                    color = ArgentSilver,
+                    fontSize = 12.sp,
+                    fontFamily = FontFamily.Monospace,
+                    modifier = Modifier.weight(1f)
+                )
+                if (o.status == "ACCEPTED" || o.status == "PARTIALLY_FILLED") {
+                    TextButton(onClick = {
+                        scope.launch {
+                            runCatching { api.cancel(o.id, o.symbol); onFlash("İptal ${o.id.take(8)}") }
+                                .onFailure { onFlash(it.message ?: "iptal hatası") }
+                        }
+                    }) { Text("İptal", color = ArgentRed, fontSize = 12.sp) }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TradesTab(trades: List<TradeDto>) {
+    if (trades.isEmpty()) {
+        Text("Bu görünümde işlem yok.", color = ArgentMuted, modifier = Modifier.padding(12.dp), fontSize = 12.sp)
+        return
+    }
+    LazyColumn(Modifier.padding(8.dp)) {
+        items(trades) { t ->
+            Text(
+                "${t.symbol}  ${compact(t.quantity)} @ ${compact(t.price)}  ${t.id.take(8)}",
+                color = ArgentSilver,
+                fontFamily = FontFamily.Monospace,
+                fontSize = 12.sp,
+                modifier = Modifier.padding(vertical = 2.dp)
+            )
+        }
+    }
+}
+
+@Composable
+private fun Metric(label: String, value: String, negative: Boolean = false) {
+    Column {
+        Text(label, color = ArgentMuted, fontSize = 10.sp)
+        Text(compact(value), color = if (negative) ArgentRed else ArgentGreen, fontFamily = FontFamily.Monospace, fontSize = 14.sp, fontWeight = FontWeight.SemiBold)
+    }
+}
+
+@Composable
+private fun Chip(text: String, selected: Boolean, color: Color, onClick: () -> Unit) {
+    Box(
+        Modifier.background(if (selected) color.copy(alpha = 0.25f) else ArgentPanelAlt, RoundedCornerShape(4.dp))
+            .border(1.dp, if (selected) color else ArgentLine, RoundedCornerShape(4.dp))
+            .clickable(onClick = onClick)
+            .padding(horizontal = 8.dp, vertical = 5.dp)
+    ) { Text(text, color = if (selected) color else ArgentMuted, fontSize = 11.sp, fontWeight = FontWeight.SemiBold) }
+}
+
+@Composable
+private fun field(label: String, value: String, type: KeyboardType = KeyboardType.Text, onChange: (String) -> Unit) {
+    OutlinedTextField(
+        value = value,
+        onValueChange = onChange,
+        label = { Text(label) },
+        modifier = Modifier.fillMaxWidth(),
+        keyboardOptions = KeyboardOptions(keyboardType = type),
+        colors = fieldColors(),
+        singleLine = true
+    )
+}
+
+@Composable
+private fun fieldColors() = OutlinedTextFieldDefaults.colors(
+    focusedTextColor = ArgentSilver,
+    unfocusedTextColor = ArgentSilver,
+    focusedBorderColor = ArgentGold,
+    unfocusedBorderColor = ArgentLine,
+    focusedLabelColor = ArgentGold,
+    unfocusedLabelColor = ArgentMuted
+)
+
+private fun compact(raw: String): String = runCatching {
+    BigDecimal(raw).stripTrailingZeros().toPlainString()
+}.getOrElse { raw }
+
+private fun spread(book: OrderBookDto): String {
+    val bid = book.bestBid?.let { runCatching { BigDecimal(it) }.getOrNull() } ?: return "—"
+    val ask = book.bestAsk?.let { runCatching { BigDecimal(it) }.getOrNull() } ?: return "—"
+    return (ask - bid).stripTrailingZeros().toPlainString()
+}

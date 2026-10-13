@@ -1,0 +1,104 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: argent
+      POSTGRES_USER: argent
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-argent}
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U argent"]
+      interval: 5s
+      timeout: 5s
+      retries: 8
+
+  redis:
+    image: redis:7-alpine
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:-argent}
+    command: ["sh", "-c", "exec redis-server --requirepass \"$${REDIS_PASSWORD}\""]
+    ports:
+      - "127.0.0.1:6379:6379"
+    healthcheck:
+      test: ["CMD-SHELL", "REDISCLI_AUTH=\"$${REDIS_PASSWORD}\" redis-cli ping | grep -q PONG"]
+      interval: 5s
+      timeout: 3s
+      retries: 8
+
+  rabbitmq:
+    image: rabbitmq:3.13-management-alpine
+    ports:
+      - "127.0.0.1:5672:5672"
+      - "127.0.0.1:15672:15672"
+    environment:
+      RABBITMQ_DEFAULT_USER: argent
+      RABBITMQ_DEFAULT_PASS: ${RABBITMQ_PASSWORD:-argent}
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "check_port_connectivity"]
+      interval: 10s
+      timeout: 5s
+      retries: 8
+
+  prometheus:
+    image: prom/prometheus:v2.54.1
+    ports:
+      - "127.0.0.1:9090:9090"
+    volumes:
+      - ./ops/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+
+  grafana:
+    image: grafana/grafana:11.2.0
+    ports:
+      - "127.0.0.1:3000:3000"
+    environment:
+      GF_SECURITY_ADMIN_USER: argent
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-argent}
+      GF_USERS_DEFAULT_THEME: dark
+    volumes:
+      - ./ops/grafana/provisioning:/etc/grafana/provisioning:ro
+      - ./ops/grafana/dashboards:/var/lib/grafana/dashboards:ro
+
+  gateway:
+    profiles: ["app"]
+    build:
+      context: .
+      dockerfile: Dockerfile
+    init: true
+    restart: unless-stopped
+    environment:
+      ARGENT_ENV: ${ARGENT_ENV:-dev}
+      ARGENT_CORS_HOSTS: ${ARGENT_CORS_HOSTS:-}
+      ARGENT_BIND_HOST: 0.0.0.0
+      PORT: 8080
+      JDBC_URL: jdbc:postgresql://postgres:5432/argent
+      DB_USER: argent
+      DB_PASS: ${POSTGRES_PASSWORD:-argent}
+      REDIS_URL: redis://:${REDIS_PASSWORD:-argent}@redis:6379
+      RABBITMQ_URL: amqp://argent:${RABBITMQ_PASSWORD:-argent}@rabbitmq:5672
+      GRAFANA_ADMIN_PASSWORD: ${GRAFANA_ADMIN_PASSWORD:-argent}
+      JWT_SECRET: ${JWT_SECRET:-argent-dev-secret-change-me-in-prod-32chars}
+      BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
+      BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
+      SEED_MARKET_MAKER: ${SEED_MARKET_MAKER:-true}
+      SEED_DEMO_FUNDS: ${SEED_DEMO_FUNDS:-true}
+      MARKET_DATA_MODE: ${MARKET_DATA_MODE:-SIMULATED}
+      MARKET_MAKER_PASSWORD: ${MARKET_MAKER_PASSWORD:-}
+      MM_MAX_QUOTE_NOTIONAL: ${MM_MAX_QUOTE_NOTIONAL:-5000}
+      MM_MAX_INVENTORY_NOTIONAL: ${MM_MAX_INVENTORY_NOTIONAL:-10000000}
+    ports:
+      - "127.0.0.1:8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+volumes:
+  pgdata:

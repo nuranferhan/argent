@@ -1,0 +1,13 @@
+global:
+  scrape_interval: 5s
+
+scrape_configs:
+  - job_name: argent-gateway
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["host.docker.internal:8080"]
+
+  - job_name: argent-gateway-container
+    metrics_path: /metrics
+    static_configs:
+      - targets: ["gateway:8080"]

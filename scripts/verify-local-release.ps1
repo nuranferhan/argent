@@ -10,10 +10,19 @@ Write-Host "ARGENT local release acceptance"
 
 $gatewayBaseUrl = if ($env:ARGENT_GATEWAY_URL) { $env:ARGENT_GATEWAY_URL.TrimEnd('/') } else { "http://127.0.0.1:8080" }
 $healthUrl = "$gatewayBaseUrl/health"
-try {
-    $health = Invoke-RestMethod -Uri $healthUrl -TimeoutSec 8
-} catch {
-    Stop-Check "Gateway health endpoint is unavailable at $healthUrl. Start the stack with .\scripts\start-stack.ps1 or .\scripts\start.ps1, then retry. $($_.Exception.Message)"
+$health = $null
+$lastHealthError = "No response received."
+for ($attempt = 0; $attempt -lt 45; $attempt++) {
+    try {
+        $health = Invoke-RestMethod -Uri $healthUrl -TimeoutSec 3
+        break
+    } catch {
+        $lastHealthError = $_.Exception.Message
+        if ($attempt -lt 44) { Start-Sleep -Seconds 2 }
+    }
+}
+if ($null -eq $health) {
+    Stop-Check "Gateway health endpoint did not respond within 90 seconds at $healthUrl. Inspect gateway startup with 'docker compose --profile app logs --tail 120 gateway'. Last error: $lastHealthError"
 }
 
 if ($health.status -ne "UP") {

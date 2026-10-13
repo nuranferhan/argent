@@ -99,9 +99,15 @@ try {
     if ($securePassword) { $securePassword.Dispose() }
 }
 
-$installer = Join-Path $PSScriptRoot "..\argent-terminal\build\compose\binaries\main\msi\Argent-1.0.3.msi"
+$terminalBuildFile = Join-Path $PSScriptRoot "..\argent-terminal\build.gradle.kts"
+$packageVersionLine = Select-String -Path $terminalBuildFile -Pattern '^\s*packageVersion\s*=\s*"([^"]+)"' | Select-Object -First 1
+if (-not $packageVersionLine) {
+    Stop-Check "Could not read the desktop package version from $terminalBuildFile."
+}
+$expectedVersion = $packageVersionLine.Matches[0].Groups[1].Value
+$installer = Join-Path $PSScriptRoot "..\argent-terminal\build\compose\binaries\main\msi\Argent-$expectedVersion.msi"
 if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) {
-    Stop-Check "Argent-1.0.3.msi was not found at $([IO.Path]::GetFullPath($installer)). Run .\scripts\package-terminal.ps1 first."
+    Stop-Check "Argent-$expectedVersion.msi was not found at $([IO.Path]::GetFullPath($installer)). Run .\scripts\package-terminal.ps1 first."
 }
 $installerItem = Get-Item -LiteralPath $installer
 if ($installerItem.Length -lt 10MB) {
@@ -117,8 +123,8 @@ $appPaths = @($appCandidates | Where-Object { $_ -and (Test-Path -LiteralPath $_
 if ($appPaths.Count -gt 0) {
     $app = Get-Item -LiteralPath $appPaths[0]
     $installedVersion = $app.VersionInfo.ProductVersion
-    if ($installedVersion -ne "1.0.3") {
-        Stop-Check "Installed Argent version is '$installedVersion' at $($app.FullName); expected 1.0.3. Install the 1.0.3 MSI before accepting this release."
+    if ($installedVersion -ne $expectedVersion) {
+        Stop-Check "Installed Argent version is '$installedVersion' at $($app.FullName); expected $expectedVersion. Install the Argent-$expectedVersion.msi before accepting this release."
     }
     Write-Host "PASS installed desktop executable: $($app.FullName)"
     Write-Host "PASS installed version: $installedVersion"

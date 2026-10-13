@@ -6,6 +6,7 @@ The intended product is a production-quality, multi-tenant internal exchange and
 
 - Kotlin multi-module gateway, matching engine, ledger, risk/portfolio logic, market data feed, Compose Desktop client and a Jetpack Compose Android client using the same gateway API.
 - Internal limit/market/IOC/FOK matching, event replay, idempotent order submission, durable order/trade storage and double-entry ledger settlement.
+- Production matching does not keep a second unbounded in-memory copy of domain events; PostgreSQL remains the durable event source. Recovery captures replay-generated fills only for settlement recovery.
 - Local Docker Compose services, health/metrics endpoints, Prometheus/Grafana configuration and Windows 11 start/package scripts.
 - PostgreSQL backup/restore scripts plus isolated restore verification (`scripts/backup-db.ps1`, `scripts/restore-db.ps1`, `scripts/verify-db-backup-restore.ps1`).
 - Configurable simulated market-data adapter, internal market-making strategy and fail-closed behavior for unconfigured external deposits/withdrawals.
@@ -55,3 +56,5 @@ The owner reports that `scripts/verify-db-backup-restore.ps1` completed successf
 On 2026-10-13, `:argent-engine:test`, `:argent-ledger:test`, `:argent-gateway:test`, `:argent-market:test`, `:argent-risk:test`, and `:argent-terminal:compileKotlin` passed on JDK 21. The gateway emitted two Ktor `Principal` deprecation warnings. The owner passed the opt-in PostgreSQL test on Windows/Docker, including legacy journal ownership migration, and passed the 1.0.3 local release acceptance after rebuilding the gateway. The JMH 1.37 result is a microbenchmark, not a production capacity claim. Android emulator workflow acceptance remains open.
 
 The immediate remaining security work for the internal/sandbox product is a threat-model and independent review, MFA/account recovery, and release/deployment hardening. TLS, secret-manager integration, network policies, alert routing, backup retention/off-host storage, incident ownership and production workload limits require a target deployment and named operator. Do not enable real customer funds or external execution based on the local verification record.
+
+The follow-up matching-engine change disables its redundant in-memory event history in the live gateway and replay/benchmark instances. Engine/gateway regression tests and desktop Kotlin compilation passed on 2026-10-13, including replayed-fill recovery with event retention disabled. A local Docker health/release check was not rerun because Docker Desktop's engine pipe was inaccessible in the current execution session; the previously reported 1.0.3 acceptance predates this source change.

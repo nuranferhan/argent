@@ -18,19 +18,20 @@ import kotlinx.coroutines.channels.Channel
 import kotlinx.coroutines.channels.SendChannel
 import kotlinx.coroutines.channels.actor
 import java.util.concurrent.ConcurrentHashMap
-import java.util.concurrent.CopyOnWriteArrayList
+import java.util.concurrent.ConcurrentLinkedQueue
 import java.util.concurrent.atomic.AtomicLong
 import java.util.concurrent.atomic.AtomicReference
 
 @OptIn(kotlinx.coroutines.ObsoleteCoroutinesApi::class)
 class MatchingEngine(
     private val eventBus: (DomainEvent) -> Unit = {},
-    private val scope: CoroutineScope = CoroutineScope(Dispatchers.Default + SupervisorJob())
+    private val scope: CoroutineScope = CoroutineScope(Dispatchers.Default + SupervisorJob()),
+    private val keepRecordedEvents: Boolean = true
 ) {
     private val books = ConcurrentHashMap<String, OrderBook>()
     private val actors = ConcurrentHashMap<String, SendChannel<EngineCommand>>()
     private val processedClientOrders = ConcurrentHashMap<String, String>()
-    private val eventLog = CopyOnWriteArrayList<DomainEvent>()
+    private val eventLog = ConcurrentLinkedQueue<DomainEvent>()
     private val seq = AtomicLong(0)
     private val fatalFailure = AtomicReference<Throwable?>(null)
 
@@ -53,11 +54,11 @@ class MatchingEngine(
     private fun nextSeq(): Long = seq.incrementAndGet()
 
     private fun publish(event: DomainEvent) {
-        eventLog.add(event)
+        if (keepRecordedEvents) eventLog.add(event)
         try {
             eventBus(event)
         } catch (cause: Exception) {
-            eventLog.remove(event)
+            if (keepRecordedEvents) eventLog.remove(event)
             throw EventPersistenceException("Could not durably record ${event::class.simpleName}", cause)
         }
     }
@@ -242,7 +243,7 @@ class MatchingEngine(
     private fun clientOrderKey(symbol: String, userId: String, clientOrderId: String) =
         "$symbol:$userId:$clientOrderId"
 
-    fun recordedEvents(): List<DomainEvent> = eventLog.toList()
+    fun recordedEvents(): List<DomainEvent> = if (keepRecordedEvents) eventLog.toList() else emptyList()
 
     suspend fun replay(events: List<DomainEvent>): List<Order> {
         val recovered = mutableListOf<Order>()

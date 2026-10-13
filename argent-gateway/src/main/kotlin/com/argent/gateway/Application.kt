@@ -133,7 +133,7 @@ fun main() {
     val ledger = LedgerService(ds, eventBus).also { it.initSchema() }
     val auth = AuthService(database, config.jwtSecret).also { it.initSchema() }
     val orders = OrderRepository(database).also { it.initSchema() }
-    val engine = MatchingEngine(eventBus)
+    val engine = MatchingEngine(eventBus, keepRecordedEvents = false)
     val market = MarketDataService(feedMode = config.marketFeedMode).also { it.start() }
     val risk = RiskService(ledger)
     val prometheus = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
@@ -145,10 +145,14 @@ fun main() {
     runBlocking {
         val history = eventStore.loadAll()
         val replayableOrderIds = history.filterIsInstance<OrderSubmitted>().map { it.order.id }.toSet()
-        val recoveryEngine = MatchingEngine()
+        val replayedEvents = mutableListOf<com.argent.common.events.DomainEvent>()
+        // Replay is read-only with respect to the durable event store. Capture its
+        // regenerated fills for settlement recovery without retaining a second
+        // unbounded event history in the engine.
+        val recoveryEngine = MatchingEngine(eventBus = replayedEvents::add, keepRecordedEvents = false)
         val recoveredOrders = recoveryEngine.replay(history)
         recoveredOrders.forEach(orders::save)
-        trading.recoverUnsettled(recoveryEngine.recordedEvents().filterIsInstance<TradeExecuted>())
+        trading.recoverUnsettled(replayedEvents.filterIsInstance<TradeExecuted>())
         recoveryEngine.shutdown()
 
         orders.findPending().forEach { pending ->
@@ -590,7 +594,7 @@ fun main() {
                     }
                     val symbol = call.parameters["symbol"]!!.uppercase()
                     val events = eventStore.load(symbol)
-                    val scratch = MatchingEngine()
+                    val scratch = MatchingEngine(keepRecordedEvents = false)
                     try {
                         scratch.replay(events)
                         val depth = scratch.depth(symbol)

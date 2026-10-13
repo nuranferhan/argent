@@ -7,6 +7,7 @@ import com.argent.common.domain.OrderType
 import com.argent.common.events.OrderCancelled
 import com.argent.common.events.OrderSubmitted
 import com.argent.common.events.TradeExecuted
+import com.argent.common.events.DomainEvent
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import io.kotest.property.Arb
@@ -66,6 +67,22 @@ class MatchingEngineTest : FunSpec({
             val second = engine.submit(a.copy(id = "other"))
             first.accepted shouldBe true
             second.accepted shouldBe false
+            engine.shutdown()
+        }
+    }
+
+    test("production mode publishes events without retaining an in-memory history") {
+        runBlocking {
+            val persistedEvents = mutableListOf<DomainEvent>()
+            val engine = MatchingEngine(eventBus = { persistedEvents.add(it) }, keepRecordedEvents = false)
+
+            val result = engine.submit(
+                Order(userId = "u", symbol = "THYAO", side = OrderSide.BUY, type = OrderType.LIMIT, price = "10", quantity = "1")
+            )
+
+            result.accepted shouldBe true
+            persistedEvents.isNotEmpty() shouldBe true
+            engine.recordedEvents() shouldBe emptyList()
             engine.shutdown()
         }
     }
@@ -131,6 +148,28 @@ class MatchingEngineTest : FunSpec({
             t1 shouldBe t2
             e1.shutdown()
             e2.shutdown()
+        }
+    }
+
+    test("replay can return regenerated fills without retaining an in-memory event history") {
+        runBlocking {
+            val orders = listOf(
+                Order(id = "replay-sell", userId = "s", symbol = "EREGL", side = OrderSide.SELL, type = OrderType.LIMIT, price = "20", quantity = "10"),
+                Order(id = "replay-buy", userId = "b", symbol = "EREGL", side = OrderSide.BUY, type = OrderType.LIMIT, price = "21", quantity = "4")
+            )
+            val live = MatchingEngine()
+            orders.forEach { live.submit(it) }
+            val history = live.recordedEvents().filter { it is OrderSubmitted || it is OrderCancelled }
+            val replayedEvents = mutableListOf<DomainEvent>()
+            val recovery = MatchingEngine(eventBus = replayedEvents::add, keepRecordedEvents = false)
+
+            recovery.replay(history)
+
+            replayedEvents.filterIsInstance<TradeExecuted>().map { it.trade.id to it.trade.quantity } shouldBe
+                live.recordedEvents().filterIsInstance<TradeExecuted>().map { it.trade.id to it.trade.quantity }
+            recovery.recordedEvents() shouldBe emptyList()
+            live.shutdown()
+            recovery.shutdown()
         }
     }
 

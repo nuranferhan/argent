@@ -149,9 +149,13 @@ fun main() {
         // Replay is read-only with respect to the durable event store. Capture its
         // regenerated fills for settlement recovery without retaining a second
         // unbounded event history in the engine.
-        val recoveryEngine = MatchingEngine(eventBus = replayedEvents::add, keepRecordedEvents = false)
+        val recoveryEngine = MatchingEngine(
+            eventBus = replayedEvents::add,
+            keepRecordedEvents = false,
+            rollbackOnMutationFailure = false
+        )
         val recoveredOrders = recoveryEngine.replay(history)
-        recoveredOrders.forEach(orders::save)
+        recoveredOrders.associateBy { it.id }.values.forEach(orders::save)
         trading.recoverUnsettled(replayedEvents.filterIsInstance<TradeExecuted>())
         recoveryEngine.shutdown()
 
@@ -594,7 +598,10 @@ fun main() {
                     }
                     val symbol = call.parameters["symbol"]!!.uppercase()
                     val events = eventStore.load(symbol)
-                    val scratch = MatchingEngine(keepRecordedEvents = false)
+                    val scratch = MatchingEngine(
+                        keepRecordedEvents = false,
+                        rollbackOnMutationFailure = false
+                    )
                     try {
                         scratch.replay(events)
                         val depth = scratch.depth(symbol)

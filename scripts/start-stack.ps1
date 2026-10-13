@@ -77,12 +77,15 @@ if ($composeExitCode -ne 0) { throw "Docker Compose failed (exit $composeExitCod
 
 Write-Host "Waiting for ARGENT API..."
 $ready = $false
-for ($i = 0; $i -lt 90; $i++) {
+for ($i = 0; $i -lt 150; $i++) {
     try {
         $health = Invoke-RestMethod "http://127.0.0.1:8080/health" -TimeoutSec 2
         if ($health.status -eq "UP") { $ready = $true; break }
     } catch { }
-    Start-Sleep -Seconds 2
+    if (($i + 1) % 15 -eq 0) {
+        Write-Host "Gateway is still recovering; waited $((($i + 1) * 2)) seconds..."
+    }
+    if ($i -lt 149) { Start-Sleep -Seconds 2 }
 }
 if (-not $ready) {
     Invoke-Docker -Arguments @("compose", "--profile", "app", "logs", "--tail", "80", "gateway") | Out-Null

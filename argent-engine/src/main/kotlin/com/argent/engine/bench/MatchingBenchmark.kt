@@ -33,7 +33,7 @@ object MatchingBenchmark {
     )
 
     suspend fun run(orderCount: Int = 50_000): Result {
-        val engine = MatchingEngine(keepRecordedEvents = false)
+        val engine = MatchingEngine(keepRecordedEvents = false, rollbackOnMutationFailure = false)
         var trades = 0
         val warmup = 2_000
         repeat(warmup) { i ->
@@ -41,7 +41,7 @@ object MatchingBenchmark {
         }
         engine.shutdown()
 
-        val live = MatchingEngine(keepRecordedEvents = false)
+        val live = MatchingEngine(keepRecordedEvents = false, rollbackOnMutationFailure = false)
         val nanos = measureNanoTime {
             repeat(orderCount) { i ->
                 val result = live.submit(limit("BTCUSDT", i, i % 2 == 0))

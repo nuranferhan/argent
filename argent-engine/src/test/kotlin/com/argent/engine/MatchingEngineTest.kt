@@ -161,7 +161,11 @@ class MatchingEngineTest : FunSpec({
             orders.forEach { live.submit(it) }
             val history = live.recordedEvents().filter { it is OrderSubmitted || it is OrderCancelled }
             val replayedEvents = mutableListOf<DomainEvent>()
-            val recovery = MatchingEngine(eventBus = replayedEvents::add, keepRecordedEvents = false)
+            val recovery = MatchingEngine(
+                eventBus = replayedEvents::add,
+                keepRecordedEvents = false,
+                rollbackOnMutationFailure = false
+            )
 
             recovery.replay(history)
 

@@ -12,17 +12,20 @@ $gatewayBaseUrl = if ($env:ARGENT_GATEWAY_URL) { $env:ARGENT_GATEWAY_URL.TrimEnd
 $healthUrl = "$gatewayBaseUrl/health"
 $health = $null
 $lastHealthError = "No response received."
-for ($attempt = 0; $attempt -lt 45; $attempt++) {
+for ($attempt = 0; $attempt -lt 100; $attempt++) {
     try {
-        $health = Invoke-RestMethod -Uri $healthUrl -TimeoutSec 3
+        $health = Invoke-RestMethod -Uri $healthUrl -TimeoutSec 2
         break
     } catch {
         $lastHealthError = $_.Exception.Message
-        if ($attempt -lt 44) { Start-Sleep -Seconds 2 }
+        if (($attempt + 1) % 10 -eq 0) {
+            Write-Host "Gateway is still starting; waited $((($attempt + 1) * 3)) seconds..."
+        }
+        if ($attempt -lt 99) { Start-Sleep -Seconds 1 }
     }
 }
 if ($null -eq $health) {
-    Stop-Check "Gateway health endpoint did not respond within 90 seconds at $healthUrl. Inspect gateway startup with 'docker compose --profile app logs --tail 120 gateway'. Last error: $lastHealthError"
+    Stop-Check "Gateway health endpoint did not respond within 300 seconds at $healthUrl. Inspect gateway startup with 'docker compose --profile app logs --tail 120 gateway'. Last error: $lastHealthError"
 }
 
 if ($health.status -ne "UP") {

@@ -26,7 +26,8 @@ import java.util.concurrent.atomic.AtomicReference
 class MatchingEngine(
     private val eventBus: (DomainEvent) -> Unit = {},
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.Default + SupervisorJob()),
-    private val keepRecordedEvents: Boolean = true
+    private val keepRecordedEvents: Boolean = true,
+    private val rollbackOnMutationFailure: Boolean = true
 ) {
     private val books = ConcurrentHashMap<String, OrderBook>()
     private val actors = ConcurrentHashMap<String, SendChannel<EngineCommand>>()
@@ -81,15 +82,14 @@ class MatchingEngine(
             scope.actor(capacity = Channel.UNLIMITED) {
                 val book = books.computeIfAbsent(symbol) { OrderBook(symbol) }
                 for (cmd in channel) {
-                    val snapshot = when (cmd) {
-                        is EngineCommand.Submit, is EngineCommand.Cancel, is EngineCommand.Restore, is EngineCommand.Clear -> book.snapshotOrders()
-                        else -> null
-                    }
+                    val mutating = cmd is EngineCommand.Submit || cmd is EngineCommand.Cancel ||
+                        cmd is EngineCommand.Restore || cmd is EngineCommand.Clear
+                    val snapshot = if (mutating && rollbackOnMutationFailure) book.snapshotOrders() else null
                     val clientOrdersSnapshot = if (snapshot != null) {
                         processedClientOrders.filterKeys { it.startsWith("${symbol}:") }
                     } else emptyMap()
                     try {
-                        if (snapshot != null) ensureHealthy()
+                        if (mutating) ensureHealthy()
                         when (cmd) {
                         is EngineCommand.Submit -> handleSubmit(book, cmd)
                         is EngineCommand.Cancel -> {

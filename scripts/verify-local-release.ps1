@@ -6,9 +6,10 @@ function Stop-Check([string]$Message) {
     exit 1
 }
 
-Write-Host "ARGENT local release acceptance (read-only)"
+Write-Host "ARGENT local release acceptance"
 
-$healthUrl = if ($env:ARGENT_GATEWAY_URL) { "$($env:ARGENT_GATEWAY_URL.TrimEnd('/'))/health" } else { "http://127.0.0.1:8080/health" }
+$gatewayBaseUrl = if ($env:ARGENT_GATEWAY_URL) { $env:ARGENT_GATEWAY_URL.TrimEnd('/') } else { "http://127.0.0.1:8080" }
+$healthUrl = "$gatewayBaseUrl/health"
 try {
     $health = Invoke-RestMethod -Uri $healthUrl -TimeoutSec 8
 } catch {
@@ -32,6 +33,52 @@ Write-Host "PASS PostgreSQL, Redis, RabbitMQ"
 Write-Host "Execution mode: $($health.executionMode)"
 Write-Host "Crypto market data: $($health.cryptoMarketData)"
 Write-Host "BIST market data: $($health.bistMarketData)"
+
+$adminEmail = $env:ARGENT_ADMIN_EMAIL
+if ([string]::IsNullOrWhiteSpace($adminEmail)) {
+    $adminEmail = Read-Host "Admin email for ledger reconciliation check"
+}
+$adminPassword = $env:ARGENT_ADMIN_PASSWORD
+$securePassword = $null
+$passwordPointer = [IntPtr]::Zero
+if ([string]::IsNullOrEmpty($adminPassword)) {
+    $securePassword = Read-Host "Admin password" -AsSecureString
+    $passwordPointer = [Runtime.InteropServices.Marshal]::SecureStringToBSTR($securePassword)
+    $adminPassword = [Runtime.InteropServices.Marshal]::PtrToStringBSTR($passwordPointer)
+}
+try {
+    $loginBody = @{ email = $adminEmail; password = $adminPassword } | ConvertTo-Json -Compress
+    $login = Invoke-RestMethod -Uri "$gatewayBaseUrl/api/v1/auth/login" -Method Post -ContentType "application/json" -Body $loginBody -TimeoutSec 8
+    if ([string]::IsNullOrWhiteSpace($login.accessToken)) {
+        Stop-Check "Admin login did not return an access token; ledger reconciliation was not checked."
+    }
+    $headers = @{ Authorization = "Bearer $($login.accessToken)" }
+    $reconciliation = Invoke-RestMethod -Uri "$gatewayBaseUrl/api/v1/admin/ledger/reconciliation" -Headers $headers -TimeoutSec 15
+    if ($reconciliation.ok -ne $true -or @($reconciliation.mismatches).Count -ne 0) {
+        Stop-Check "Ledger reconciliation failed: checked=$($reconciliation.checkedAccountAssets), mismatches=$(@($reconciliation.mismatches).Count)."
+    }
+    Write-Host "PASS admin ledger reconciliation: $($reconciliation.checkedAccountAssets) account/asset pairs, no mismatches"
+} catch {
+    Stop-Check "Could not verify the ADMIN ledger reconciliation endpoint. Check the admin credentials, rate limit, and gateway logs. $($_.Exception.Message)"
+} finally {
+    if ($login -and $login.refreshToken) {
+        try {
+            $logoutBody = @{ refreshToken = $login.refreshToken } | ConvertTo-Json -Compress
+            $null = Invoke-RestMethod -Uri "$gatewayBaseUrl/api/v1/auth/logout" -Method Post -ContentType "application/json" -Body $logoutBody -TimeoutSec 8
+        } catch {
+            Write-Warning "Could not revoke the temporary release-check refresh token; it expires according to the normal session policy."
+        }
+    }
+    $adminPassword = $null
+    $loginBody = $null
+    $logoutBody = $null
+    $headers = $null
+    $login = $null
+    if ($passwordPointer -ne [IntPtr]::Zero) {
+        [Runtime.InteropServices.Marshal]::ZeroFreeBSTR($passwordPointer)
+    }
+    if ($securePassword) { $securePassword.Dispose() }
+}
 
 $installer = Join-Path $PSScriptRoot "..\argent-terminal\build\compose\binaries\main\msi\Argent-1.0.3.msi"
 if (-not (Test-Path -LiteralPath $installer -PathType Leaf)) {

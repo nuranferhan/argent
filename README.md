@@ -216,7 +216,7 @@ güven aralığı geniştir; bu değerler yalnızca o makine ve o çalıştırma
 
 Gateway `/metrics` (Micrometer/Prometheus). Compose Grafana panosu `ops/grafana/dashboards/argent.json` otomatik yüklenir.
 
-Windows yerel stack ve teslim paketini salt okunur biçimde kontrol etmek için servisler açıkken `.\scripts\verify-local-release.ps1` çalıştırın. Başlatma, durdurma, yedekleme ve arıza adımları [operasyon runbook'unda](docs/operations-runbook.md) yer alır.
+Windows yerel stack ve teslim paketini kontrol etmek için servisler açıkken `.\scripts\verify-local-release.ps1` çalıştırın. Script yöneticiyle oturum açıp ledger mutabakatını doğrular ve geçici refresh token'ı sonunda iptal eder; işlem veya bakiye değiştirmez. PostgreSQL üzerinde gerçek servis testi için `.\scripts\test-postgres-integration.ps1` kullanın. Başlatma, durdurma, yedekleme ve arıza adımları [operasyon runbook'unda](docs/operations-runbook.md) yer alır.
 
 ## Veritabanı yedekleme ve geri yükleme
 

@@ -8,8 +8,9 @@ This runbook applies to the Windows 11 local internal-exchange deployment. Order
 2. Open PowerShell in `C:\Users\Lenovo\Projects\argent`.
 3. Start the local stack with `.\scripts\start-stack.ps1` or start infrastructure with `docker compose up -d` and run `.\scripts\start.ps1` for the host gateway. Keep the foreground gateway window open.
 4. To build the updated desktop client, run `.\scripts\package-terminal.ps1` in another PowerShell window, then install `argent-terminal\build\compose\binaries\main\msi\Argent-1.0.3.msi`. Keep the gateway window open while building/installing.
-5. Run `.\scripts\verify-local-release.ps1`. A successful check reports API health, ledger invariant, PostgreSQL, Redis, RabbitMQ, the 1.0.3 installer and installed executable. The check is read-only.
-6. Open ARGENT from the Windows Start menu. If login is rate-limited, wait for the configured window or clear only the login rate-limit keys in Redis; do not flush Redis or delete the database.
+5. Run `.\scripts\verify-local-release.ps1`. A successful check reports API health, ledger invariant, PostgreSQL, Redis, RabbitMQ, admin ledger reconciliation, the 1.0.3 installer and installed executable. It creates then revokes a temporary refresh token but does not place orders or alter balances.
+6. Run `.\scripts/test-postgres-integration.ps1` with PostgreSQL running. The test creates a temporary schema, tests concurrent reservations and settlement replay across a new database connection, then drops the schema.
+7. Open ARGENT from the Windows Start menu. If login is rate-limited, wait for the configured window or clear only the login rate-limit keys in Redis; do not flush Redis or delete the database.
 
 ## Android sandbox client
 

@@ -31,7 +31,7 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Msi)
             packageName = "Argent"
-            packageVersion = "1.0.3"
+            packageVersion = "1.0.6"
             description = "ARGENT Multi-Asset Trading Terminal"
         }
     }

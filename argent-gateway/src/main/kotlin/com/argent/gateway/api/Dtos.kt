@@ -116,6 +116,18 @@ data class LedgerReconciliationMismatchDto(
     val balanceTotal: String
 )
 
+@Serializable data class BinanceTestnetOrderRequest(
+    val symbol: String,
+    val side: String,
+    val type: String,
+    val quantity: String,
+    val price: String? = null,
+    val timeInForce: String = "GTC",
+    val clientOrderId: String? = null
+)
+@Serializable data class BinanceTestnetStatusResponse(val configured: Boolean, val environment: String = "SPOT_TESTNET", val usesArgentLedger: Boolean = false)
+@Serializable data class BistHistoricalReplayRequest(val csv: String, val speed: Int = 1000)
+
 @Serializable
 data class TickerResponse(val symbol: String, val price: String, val bid: String? = null, val ask: String? = null)
 

@@ -74,6 +74,10 @@ import com.argent.terminal.api.TradeDto
 import com.argent.terminal.api.TenantDto
 import com.argent.terminal.api.TenantMemberDto
 import com.argent.terminal.api.MarketMakerStateDto
+import com.argent.terminal.api.BinanceTestnetStatusDto
+import com.argent.terminal.api.BinanceTestnetOrderDto
+import com.argent.terminal.api.BinanceTestnetOrderRequestDto
+import com.argent.terminal.api.BistReplayDto
 import com.argent.terminal.ui.ArgentBg
 import com.argent.terminal.ui.ArgentBlue
 import com.argent.terminal.ui.ArgentColors
@@ -355,6 +359,7 @@ private fun TopBar(
     onWorkspaceClosed: () -> Unit
 ) {
     var workspaceOpen by remember { mutableStateOf(false) }
+    var lastTestnetOrder by remember { mutableStateOf<BinanceTestnetOrderDto?>(null) }
     Row(
         Modifier.fillMaxWidth().heightIn(min = 56.dp).background(ArgentPanel).padding(horizontal = 16.dp, vertical = 8.dp),
         verticalAlignment = Alignment.CenterVertically
@@ -417,7 +422,9 @@ private fun TopBar(
         onClose = { workspaceOpen = false },
         onFlash = onFlash,
         onMeChanged = onMeChanged,
-        onWorkspaceClosed = onWorkspaceClosed
+        onWorkspaceClosed = onWorkspaceClosed,
+        testnetOrder = lastTestnetOrder,
+        onTestnetOrderChanged = { lastTestnetOrder = it }
     )
 }
 
@@ -429,7 +436,9 @@ private fun WorkspaceDialog(
     onClose: () -> Unit,
     onFlash: (String) -> Unit,
     onMeChanged: (MeResponse) -> Unit,
-    onWorkspaceClosed: () -> Unit
+    onWorkspaceClosed: () -> Unit,
+    testnetOrder: BinanceTestnetOrderDto?,
+    onTestnetOrderChanged: (BinanceTestnetOrderDto?) -> Unit
 ) {
     var tenants by remember { mutableStateOf(emptyList<TenantDto>()) }
     var members by remember { mutableStateOf(emptyList<TenantMemberDto>()) }
@@ -441,17 +450,33 @@ private fun WorkspaceDialog(
     var error by remember { mutableStateOf<String?>(null) }
     var closing by remember { mutableStateOf(false) }
     var marketMaker by remember { mutableStateOf<MarketMakerStateDto?>(null) }
+    var testnet by remember { mutableStateOf<BinanceTestnetStatusDto?>(null) }
+    var testnetSubmitting by remember { mutableStateOf(false) }
+    var testnetSymbol by remember { mutableStateOf("BTCUSDT") }
+    var testnetSide by remember { mutableStateOf("BUY") }
+    var testnetType by remember { mutableStateOf("LIMIT") }
+    var testnetTif by remember { mutableStateOf("GTC") }
+    var testnetQuantity by remember { mutableStateOf("0.001") }
+    var testnetPrice by remember { mutableStateOf("30000") }
+    var bistCsv by remember { mutableStateOf("") }
+    var bistReplaySpeed by remember { mutableStateOf("1000") }
+    var bistReplay by remember { mutableStateOf<BistReplayDto?>(null) }
     val canManage = me.tenantRole == "OWNER" || me.tenantRole == "ADMIN"
 
     LaunchedEffect(me.tenantId) {
         tenants = runCatching { api.tenants() }.getOrDefault(emptyList())
         if (canManage) members = runCatching { api.tenantMembers() }.getOrDefault(emptyList())
         if (me.role == "ADMIN") marketMaker = runCatching { api.marketMakerState() }.getOrNull()
+        if (me.role == "ADMIN") testnet = runCatching { api.binanceSpotTestnetStatus() }.getOrNull()
+        if (me.role == "ADMIN") bistReplay = runCatching { api.bistHistoricalReplayStatus() }.getOrNull()
     }
     fun runAction(action: suspend () -> Unit) {
         scope.launch {
             error = null
-            try { action() } catch (failure: Exception) { error = failure.message ?: "İşlem başarısız" }
+            try { action() } catch (failure: Exception) {
+                error = failure.message ?: "İşlem başarısız"
+                onFlash(error!!)
+            }
         }
     }
     AlertDialog(
@@ -476,6 +501,79 @@ private fun WorkspaceDialog(
                                 marketMaker = api.marketMakerState()
                             }
                         }) { Text(if (marketMaker!!.enabled) "KILL SWITCH" else "Yeniden başlat", color = if (marketMaker!!.enabled) ArgentRed else ArgentGreen) }
+                    }
+                    Text("Binance Spot Testnet · gerçek para yok · ARGENT bakiyesini kullanmaz", color = ArgentGold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text(
+                        when (testnet?.configured) {
+                            true -> "Testnet anahtarları yerel gateway ortamında yapılandırılmış. Emirler yalnızca Binance test ağına gönderilir."
+                            false -> "Testnet kapalı. Yerel .env dosyasına yalnızca Binance Spot Testnet anahtarlarını ekleyip gateway'i yeniden başlatın."
+                            null -> "Testnet ayarı okunamadı."
+                        }, color = ArgentMuted, fontSize = 11.sp
+                    )
+                    if (testnet?.configured == true) {
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                            OutlinedTextField(testnetSymbol, { testnetSymbol = it.uppercase() }, label = { Text("Sembol") }, modifier = Modifier.weight(1f), singleLine = true, colors = fieldColors())
+                            TextButton(onClick = { testnetSide = if (testnetSide == "BUY") "SELL" else "BUY" }) { Text(testnetSide, color = if (testnetSide == "BUY") ArgentGreen else ArgentRed) }
+                            TextButton(onClick = { testnetType = if (testnetType == "LIMIT") "MARKET" else "LIMIT" }) { Text(testnetType, color = ArgentGold) }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+                            OutlinedTextField(testnetQuantity, { testnetQuantity = it }, label = { Text("Miktar") }, modifier = Modifier.weight(1f), singleLine = true, colors = fieldColors())
+                            if (testnetType == "LIMIT") OutlinedTextField(testnetPrice, { testnetPrice = it }, label = { Text("Fiyat") }, modifier = Modifier.weight(1f), singleLine = true, colors = fieldColors())
+                            if (testnetType == "LIMIT") TextButton(onClick = { testnetTif = when (testnetTif) { "GTC" -> "IOC"; "IOC" -> "FOK"; else -> "GTC" } }) { Text(testnetTif, color = ArgentGold) }
+                        }
+                        Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Button(enabled = !testnetSubmitting, onClick = {
+                                testnetSubmitting = true
+                                runAction {
+                                    try {
+                                        val result = api.placeBinanceSpotTestnetOrder(BinanceTestnetOrderRequestDto(
+                                            symbol = testnetSymbol.trim(), side = testnetSide, type = testnetType,
+                                            quantity = testnetQuantity.trim(), price = testnetPrice.takeIf { testnetType == "LIMIT" }?.trim(),
+                                            timeInForce = if (testnetType == "LIMIT") testnetTif else "GTC",
+                                            clientOrderId = "ag-${java.util.UUID.randomUUID().toString().replace("-", "")}"
+                                        ))
+                                        onTestnetOrderChanged(result)
+                                        onFlash("Testnet ${result.status} · #${result.orderId}")
+                                    } finally {
+                                        testnetSubmitting = false
+                                    }
+                                }
+                            }) { Text(if (testnetSubmitting) "GÖNDERİLİYOR…" else "TESTNET EMRİ GÖNDER") }
+                            testnetOrder?.let { order ->
+                                TextButton(onClick = { runAction { onTestnetOrderChanged(api.binanceSpotTestnetOrder(order.symbol, order.orderId)) } }) { Text("Durumu sorgula", color = ArgentBlue) }
+                                if (order.status in setOf("NEW", "PARTIALLY_FILLED")) TextButton(onClick = {
+                                    runAction { onTestnetOrderChanged(api.cancelBinanceSpotTestnetOrder(order.symbol, order.orderId)) }
+                                }) { Text("Test emrini iptal et", color = ArgentRed) }
+                            }
+                        }
+                        testnetOrder?.let { order -> Text("${order.symbol} ${order.side} · ${order.status} · ${order.executedQty}/${order.origQty} · testnet #${order.orderId}", color = ArgentSilver, fontSize = 11.sp) }
+                        error?.let { Text("Testnet sonucu: $it", color = ArgentRed, fontSize = 11.sp) }
+                    }
+                    Text("BIST: fiyat akışı simüledir. Yalnızca kullanım hakkınız olan CSV verisini yönetici replay API'siyle içe aktarın; gerçek zamanlı BIST verisi veya BIST emri değildir.", color = ArgentMuted, fontSize = 10.sp)
+                    OutlinedTextField(
+                        value = bistCsv,
+                        onValueChange = { if (it.length <= 2 * 1024 * 1024) bistCsv = it },
+                        label = { Text("BIST tarihsel CSV (timestamp,symbol,price[,volume24h])") },
+                        placeholder = { Text("2026-01-02T10:00:00Z,THYAO,300.25,1000") },
+                        modifier = Modifier.fillMaxWidth(), minLines = 3, maxLines = 5, colors = fieldColors()
+                    )
+                    Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+                        OutlinedTextField(
+                            value = bistReplaySpeed,
+                            onValueChange = { if (it.all(Char::isDigit) && it.length <= 6) bistReplaySpeed = it },
+                            label = { Text("Hız çarpanı") }, modifier = Modifier.width(150.dp), singleLine = true,
+                            keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number), colors = fieldColors()
+                        )
+                        Button(enabled = bistCsv.isNotBlank(), onClick = {
+                            runAction {
+                                bistReplay = api.startBistHistoricalReplay(bistCsv, bistReplaySpeed.toIntOrNull() ?: 1000)
+                                bistCsv = ""
+                            }
+                        }) { Text("BIST CSV replay başlat") }
+                        TextButton(onClick = { runAction { bistReplay = api.bistHistoricalReplayStatus() } }) { Text("Durumu yenile", color = ArgentBlue) }
+                    }
+                    bistReplay?.let { replay ->
+                        Text("Replay ${replay.state} · ${replay.processed}/${replay.rows} satır${replay.error?.let { " · $it" } ?: ""}", color = if (replay.state == "FAILED") ArgentRed else ArgentMuted, fontSize = 11.sp)
                     }
                 }
                 tenants.forEach { tenant ->

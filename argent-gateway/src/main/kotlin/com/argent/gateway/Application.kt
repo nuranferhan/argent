@@ -4,6 +4,9 @@ import com.argent.common.domain.Instruments
 import com.argent.engine.MatchingEngine
 import com.argent.engine.OrderBookDepth
 import com.argent.gateway.api.CancelResponse
+import com.argent.gateway.api.BinanceTestnetOrderRequest
+import com.argent.gateway.api.BinanceTestnetStatusResponse
+import com.argent.gateway.api.BistHistoricalReplayRequest
 import com.argent.gateway.api.DepositRequest
 import com.argent.gateway.api.ErrorResponse
 import com.argent.gateway.api.HealthResponse
@@ -51,6 +54,9 @@ import com.argent.market.EventBroker
 import com.argent.market.MarketDataService
 import com.argent.market.MarketFeedMode
 import com.argent.market.TickerUpdate
+import com.argent.market.BinanceSpotTestnet
+import com.argent.market.BinanceTestnetException
+import com.argent.market.TestnetOrderRequest
 import com.argent.risk.RiskService
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
@@ -135,6 +141,7 @@ fun main() {
     val orders = OrderRepository(database).also { it.initSchema() }
     val engine = MatchingEngine(eventBus, keepRecordedEvents = false)
     val market = MarketDataService(feedMode = config.marketFeedMode).also { it.start() }
+    val binanceTestnet = BinanceSpotTestnet(config.binanceSpotTestnetApiKey, config.binanceSpotTestnetSecret)
     val risk = RiskService(ledger)
     val prometheus = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
     val trading = TradingService(engine, ledger, risk, orders, market, prometheus)
@@ -560,6 +567,73 @@ fun main() {
                             }
                         )
                     )
+                }
+                get("/api/v1/admin/binance-spot-testnet") {
+                    val p = call.principal<ArgentPrincipal>()!!
+                    if (p.role != UserRole.ADMIN.name) return@get call.respond(HttpStatusCode.Forbidden, ErrorResponse("Admin only"))
+                    call.respond(BinanceTestnetStatusResponse(configured = binanceTestnet.configured))
+                }
+                post("/api/v1/admin/binance-spot-testnet/orders") {
+                    val p = call.principal<ArgentPrincipal>()!!
+                    if (p.role != UserRole.ADMIN.name) return@post call.respond(HttpStatusCode.Forbidden, ErrorResponse("Admin only"))
+                    if (!binanceTestnet.configured) return@post call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse("Configure Binance Spot Testnet credentials locally first"))
+                    val body = call.receive<BinanceTestnetOrderRequest>()
+                    try {
+                        val result = binanceTestnet.placeOrder(TestnetOrderRequest(
+                            symbol = body.symbol,
+                            side = body.side,
+                            type = body.type,
+                            quantity = body.quantity,
+                            price = body.price,
+                            timeInForce = body.timeInForce,
+                            clientOrderId = body.clientOrderId
+                        ))
+                        call.respond(result)
+                    } catch (failure: BinanceTestnetException) {
+                        val status = if (failure.upstreamStatus in 400..499) HttpStatusCode.BadRequest else HttpStatusCode.BadGateway
+                        call.respond(status, ErrorResponse(failure.message ?: "Binance Spot Testnet request failed"))
+                    }
+                }
+                get("/api/v1/admin/binance-spot-testnet/orders/{orderId}") {
+                    val p = call.principal<ArgentPrincipal>()!!
+                    if (p.role != UserRole.ADMIN.name) return@get call.respond(HttpStatusCode.Forbidden, ErrorResponse("Admin only"))
+                    if (!binanceTestnet.configured) return@get call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse("Configure Binance Spot Testnet credentials locally first"))
+                    val symbol = call.request.queryParameters["symbol"] ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("symbol query parameter is required"))
+                    val orderId = call.parameters["orderId"]?.toLongOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("orderId must be numeric"))
+                    try { call.respond(binanceTestnet.getOrder(symbol, orderId)) }
+                    catch (failure: BinanceTestnetException) {
+                        val status = if (failure.upstreamStatus in 400..499) HttpStatusCode.BadRequest else HttpStatusCode.BadGateway
+                        call.respond(status, ErrorResponse(failure.message ?: "Binance Spot Testnet request failed"))
+                    }
+                }
+                delete("/api/v1/admin/binance-spot-testnet/orders/{orderId}") {
+                    val p = call.principal<ArgentPrincipal>()!!
+                    if (p.role != UserRole.ADMIN.name) return@delete call.respond(HttpStatusCode.Forbidden, ErrorResponse("Admin only"))
+                    if (!binanceTestnet.configured) return@delete call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse("Configure Binance Spot Testnet credentials locally first"))
+                    val symbol = call.request.queryParameters["symbol"] ?: return@delete call.respond(HttpStatusCode.BadRequest, ErrorResponse("symbol query parameter is required"))
+                    val orderId = call.parameters["orderId"]?.toLongOrNull() ?: return@delete call.respond(HttpStatusCode.BadRequest, ErrorResponse("orderId must be numeric"))
+                    try { call.respond(binanceTestnet.cancelOrder(symbol, orderId)) }
+                    catch (failure: BinanceTestnetException) {
+                        val status = if (failure.upstreamStatus in 400..499) HttpStatusCode.BadRequest else HttpStatusCode.BadGateway
+                        call.respond(status, ErrorResponse(failure.message ?: "Binance Spot Testnet request failed"))
+                    }
+                }
+                post("/api/v1/admin/market-data/bist/replay") {
+                    val p = call.principal<ArgentPrincipal>()!!
+                    if (p.role != UserRole.ADMIN.name) return@post call.respond(HttpStatusCode.Forbidden, ErrorResponse("Admin only"))
+                    val request = call.receive<BistHistoricalReplayRequest>()
+                    try {
+                        call.respond(HttpStatusCode.Accepted, market.startBistHistoricalReplay(request.csv, request.speed))
+                    } catch (failure: IllegalArgumentException) {
+                        call.respond(HttpStatusCode.BadRequest, ErrorResponse(failure.message ?: "Invalid BIST CSV"))
+                    } catch (failure: IllegalStateException) {
+                        call.respond(HttpStatusCode.Conflict, ErrorResponse(failure.message ?: "BIST replay unavailable"))
+                    }
+                }
+                get("/api/v1/admin/market-data/bist/replay") {
+                    val p = call.principal<ArgentPrincipal>()!!
+                    if (p.role != UserRole.ADMIN.name) return@get call.respond(HttpStatusCode.Forbidden, ErrorResponse("Admin only"))
+                    call.respond(market.bistHistoricalReplayStatus() ?: mapOf("state" to "IDLE"))
                 }
                 get("/api/v1/admin/market-maker") {
                     val p = call.principal<ArgentPrincipal>()!!

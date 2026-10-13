@@ -22,6 +22,9 @@ import org.slf4j.LoggerFactory
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.util.concurrent.ConcurrentHashMap
+import java.time.Instant
+import java.util.UUID
+import java.util.concurrent.atomic.AtomicBoolean
 
 @Serializable
 data class TickerUpdate(
@@ -33,6 +36,10 @@ data class TickerUpdate(
     val source: String,
     val timestamp: Long = System.currentTimeMillis()
 )
+
+data class BistHistoricalRow(val timestamp: Long, val symbol: String, val price: String, val volume24h: String? = null)
+@Serializable
+data class BistReplayStatus(val replayId: String, val state: String, val rows: Int, val processed: Int, val error: String? = null)
 
 enum class MarketFeedMode { SIMULATED, BINANCE_PUBLIC }
 
@@ -84,6 +91,8 @@ class MarketDataService(
     private val lastTickers = ConcurrentHashMap<String, TickerUpdate>()
     private val lastUpdatedAt = ConcurrentHashMap<String, Long>()
     private val history = ConcurrentHashMap<String, ArrayDeque<TickerUpdate>>()
+    private val bistReplayActive = AtomicBoolean(false)
+    @Volatile private var bistReplayStatus: BistReplayStatus? = null
 
     fun start() {
         when (feedMode) {
@@ -164,8 +173,10 @@ class MarketDataService(
         }
         while (true) {
             for (instrument in instruments) {
+                if (instrument.assetClass == AssetClass.EQUITY && bistReplayActive.get()) continue
                 val symbol = instrument.symbol
-                val last = prices.getValue(symbol)
+                // Resume the simulator from the most recent replayed/imported equity quote.
+                val last = lastPrices[symbol] ?: prices.getValue(symbol)
                 val generator = generators.getValue(symbol)
                 val next = generator.nextPrice(last)
                 prices[symbol] = next
@@ -186,6 +197,72 @@ class MarketDataService(
             }
             delay(500)
         }
+    }
+
+    /** Imports only caller-supplied local CSV rows; no BIST data source or redistribution is implied. */
+    fun startBistHistoricalReplay(csv: String, speed: Int): BistReplayStatus {
+        require(csv.toByteArray(Charsets.UTF_8).size <= MAX_BIST_CSV_BYTES) { "CSV exceeds the 2 MiB limit" }
+        require(speed in 1..100_000) { "speed must be between 1 and 100000" }
+        val rows = parseBistCsv(csv)
+        check(bistReplayActive.compareAndSet(false, true)) { "A BIST historical replay is already running" }
+        val id = UUID.randomUUID().toString()
+        bistReplayStatus = BistReplayStatus(id, "RUNNING", rows.size, 0)
+        scope.launch {
+            try {
+                var previousTimestamp: Long? = null
+                rows.forEachIndexed { index, row ->
+                    previousTimestamp?.let { previous ->
+                        val scaledDelay = ((row.timestamp - previous).coerceAtLeast(0) / speed).coerceAtMost(5_000)
+                        if (scaledDelay > 0) delay(scaledDelay)
+                    }
+                    previousTimestamp = row.timestamp
+                    publish(TickerUpdate(row.symbol, row.price, volume24h = row.volume24h, source = "bist-csv-replay", timestamp = row.timestamp))
+                    bistReplayStatus = BistReplayStatus(id, "RUNNING", rows.size, index + 1)
+                }
+                bistReplayStatus = BistReplayStatus(id, "COMPLETED", rows.size, rows.size)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                bistReplayStatus = BistReplayStatus(id, "CANCELLED", rows.size, bistReplayStatus?.processed ?: 0)
+                throw cancelled
+            } catch (failure: Exception) {
+                bistReplayStatus = BistReplayStatus(id, "FAILED", rows.size, bistReplayStatus?.processed ?: 0, failure.message ?: "Replay failed")
+            } finally {
+                bistReplayActive.set(false)
+            }
+        }
+        return bistReplayStatus!!
+    }
+
+    fun bistHistoricalReplayStatus(): BistReplayStatus? = bistReplayStatus
+
+    private fun parseBistCsv(csv: String): List<BistHistoricalRow> {
+        val lines = csv.lineSequence().map(String::trim).filter(String::isNotEmpty).toList()
+        require(lines.size in 2..(MAX_BIST_ROWS + 1)) { "CSV must contain a header and 1-${MAX_BIST_ROWS} data rows" }
+        val header = lines.first().removePrefix("\uFEFF").split(',').map { it.trim().lowercase() }
+        require(header == listOf("timestamp", "symbol", "price") || header == listOf("timestamp", "symbol", "price", "volume24h")) {
+            "CSV header must be timestamp,symbol,price[,volume24h]"
+        }
+        val rows = lines.drop(1).mapIndexed { index, line ->
+            val columns = line.split(',').map(String::trim)
+            require(columns.size == header.size) { "Invalid CSV column count at data row ${index + 1}" }
+            val timestamp = columns[0].toLongOrNull() ?: runCatching { Instant.parse(columns[0]).toEpochMilli() }
+                .getOrElse { throw IllegalArgumentException("Invalid timestamp at data row ${index + 1}") }
+            require(timestamp > 0) { "Timestamp must be Unix milliseconds or ISO-8601" }
+            val symbol = columns[1].uppercase()
+            val instrument = Instruments.get(symbol)
+            require(instrument?.assetClass == AssetClass.EQUITY) { "Only configured BIST equity symbols are accepted: $symbol" }
+            val price = columns[2].toBigDecimalOrNull()
+            require(price != null && price.signum() > 0 && price.scale() <= instrument!!.priceScale &&
+                price.remainder(BigDecimal(instrument.tickSize)).signum() == 0) {
+                "Invalid price precision or tick size at data row ${index + 1}"
+            }
+            val volume = columns.getOrNull(3)?.takeIf(String::isNotBlank)?.also {
+                val parsed = it.toBigDecimalOrNull()
+                require(parsed != null && parsed.signum() >= 0 && parsed.scale() <= 12) { "Invalid volume at data row ${index + 1}" }
+            }
+            BistHistoricalRow(timestamp, symbol, price!!.stripTrailingZeros().toPlainString(), volume)
+        }
+        require(rows.zipWithNext().all { (a, b) -> a.timestamp <= b.timestamp }) { "CSV rows must be in ascending timestamp order" }
+        return rows
     }
 
     private suspend fun publish(update: TickerUpdate) {
@@ -236,5 +313,7 @@ class MarketDataService(
     companion object {
         private const val MAX_PRICE_AGE_MS = 15_000L
         private const val MAX_RETRY_DELAY_MS = 30_000L
+        private const val MAX_BIST_CSV_BYTES = 2 * 1024 * 1024
+        private const val MAX_BIST_ROWS = 50_000
     }
 }

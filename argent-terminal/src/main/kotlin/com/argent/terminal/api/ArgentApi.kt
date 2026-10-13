@@ -110,6 +110,26 @@ class ArgentApi(var baseUrl: String = "http://127.0.0.1:8080") {
         saveTokens(tokens)
     }
     suspend fun marketMakerState(): MarketMakerStateDto = get("/api/v1/admin/market-maker")
+    suspend fun binanceSpotTestnetStatus(): BinanceTestnetStatusDto = get("/api/v1/admin/binance-spot-testnet")
+    suspend fun placeBinanceSpotTestnetOrder(request: BinanceTestnetOrderRequestDto): BinanceTestnetOrderDto =
+        post("/api/v1/admin/binance-spot-testnet/orders", request)
+    suspend fun binanceSpotTestnetOrder(symbol: String, orderId: Long): BinanceTestnetOrderDto =
+        get("/api/v1/admin/binance-spot-testnet/orders/$orderId?symbol=$symbol")
+    suspend fun cancelBinanceSpotTestnetOrder(symbol: String, orderId: Long): BinanceTestnetOrderDto {
+        var response = client.delete("$baseUrl/api/v1/admin/binance-spot-testnet/orders/$orderId?symbol=$symbol") {
+            token?.let { header("Authorization", "Bearer $it") }
+        }
+        if (response.status == HttpStatusCode.Unauthorized && refreshSession()) {
+            response = client.delete("$baseUrl/api/v1/admin/binance-spot-testnet/orders/$orderId?symbol=$symbol") {
+                token?.let { header("Authorization", "Bearer $it") }
+            }
+        }
+        if (!response.status.isSuccess()) fail(response.bodyAsText())
+        return response.body()
+    }
+    suspend fun startBistHistoricalReplay(csv: String, speed: Int): BistReplayDto =
+        post("/api/v1/admin/market-data/bist/replay", BistReplayRequestDto(csv, speed))
+    suspend fun bistHistoricalReplayStatus(): BistReplayDto = get("/api/v1/admin/market-data/bist/replay")
     suspend fun killMarketMaker(): MarketMakerActionDto = post("/api/v1/admin/market-maker/kill-switch", EmptyRequest())
     suspend fun resumeMarketMaker(): MarketMakerActionDto = post("/api/v1/admin/market-maker/resume", EmptyRequest())
     suspend fun instruments(): List<InstrumentDto> = get("/api/v1/instruments")
@@ -273,6 +293,24 @@ class ArgentApi(var baseUrl: String = "http://127.0.0.1:8080") {
     val staleQuoteTtlMs: Long
 )
 @Serializable data class MarketMakerActionDto(val enabled: Boolean, val cancelledOrders: Int = 0)
+@Serializable data class BinanceTestnetStatusDto(val configured: Boolean, val environment: String = "SPOT_TESTNET", val usesArgentLedger: Boolean = false)
+@Serializable data class BinanceTestnetOrderRequestDto(
+    val symbol: String, val side: String, val type: String, val quantity: String,
+    val price: String? = null, val timeInForce: String = "GTC", val clientOrderId: String? = null
+)
+@Serializable data class BinanceTestnetOrderDto(
+    val symbol: String, val orderId: Long, val clientOrderId: String? = null,
+    val price: String, val origQty: String, val executedQty: String, val status: String,
+    val timeInForce: String? = null, val type: String, val side: String, val transactTime: Long? = null
+)
+@Serializable data class BistReplayRequestDto(val csv: String, val speed: Int = 1000)
+@Serializable data class BistReplayDto(
+    val replayId: String? = null,
+    val state: String,
+    val rows: Int = 0,
+    val processed: Int = 0,
+    val error: String? = null
+)
 @Serializable data class EmptyRequest(val unused: String = "")
 @Serializable data class LoginRequest(val email: String, val password: String)
 @Serializable data class RefreshRequest(val refreshToken: String)

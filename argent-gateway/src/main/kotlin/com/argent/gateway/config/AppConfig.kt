@@ -18,7 +18,9 @@ data class AppConfig(
     val seedMarketMaker: Boolean,
     val seedDemoFunds: Boolean,
     val marketFeedMode: MarketFeedMode,
-    val marketMakerPassword: String
+    val marketMakerPassword: String,
+    val binanceSpotTestnetApiKey: String?,
+    val binanceSpotTestnetSecret: String?
 ) {
     val isDev: Boolean get() = env == "dev"
 
@@ -73,6 +75,14 @@ data class AppConfig(
             }.getOrElse {
                 error("MARKET_DATA_MODE must be SIMULATED or BINANCE_PUBLIC")
             }
+            val binanceTestnetKey = System.getenv("BINANCE_SPOT_TESTNET_API_KEY")?.takeIf(String::isNotBlank)
+            val binanceTestnetSecret = System.getenv("BINANCE_SPOT_TESTNET_SECRET")?.takeIf(String::isNotBlank)
+            require((binanceTestnetKey == null) == (binanceTestnetSecret == null)) {
+                "Set both BINANCE_SPOT_TESTNET_API_KEY and BINANCE_SPOT_TESTNET_SECRET, or neither"
+            }
+            require(env == "dev" || binanceTestnetKey == null) {
+                "Binance Spot Testnet credentials are allowed only in local development"
+            }
             require(env == "dev" || (!seedMarketMaker && !seedDemoFunds)) {
                 "Market maker seeding and demo funds are allowed only when ARGENT_ENV=dev"
             }
@@ -97,7 +107,9 @@ data class AppConfig(
                 marketFeedMode = marketFeedMode,
                 marketMakerPassword = System.getenv("MARKET_MAKER_PASSWORD")
                     ?.takeIf(String::isNotBlank)
-                    ?: java.util.UUID.randomUUID().toString() + "aA1!"
+                    ?: java.util.UUID.randomUUID().toString() + "aA1!",
+                binanceSpotTestnetApiKey = binanceTestnetKey,
+                binanceSpotTestnetSecret = binanceTestnetSecret
             )
         }
 

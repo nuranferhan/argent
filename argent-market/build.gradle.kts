@@ -5,5 +5,5 @@ dependencies {
     implementation("io.ktor:ktor-client-websockets:3.0.1")
     implementation("io.ktor:ktor-client-content-negotiation:3.0.1")
     implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.1")
-    implementation("com.rabbitmq:amqp-client:5.22.0")
+    implementation("com.rabbitmq:amqp-client:5.37.0")
 }

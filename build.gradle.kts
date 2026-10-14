@@ -1,10 +1,10 @@
 plugins {
-    kotlin("jvm") version "2.0.21" apply false
-    kotlin("plugin.serialization") version "2.0.21" apply false
-    id("org.jetbrains.compose") version "1.7.0" apply false
-    id("org.jetbrains.kotlin.plugin.compose") version "2.0.21" apply false
+    kotlin("jvm") version "2.4.21" apply false
+    kotlin("plugin.serialization") version "2.4.21" apply false
+    id("org.jetbrains.compose") version "1.12.1" apply false
+    id("org.jetbrains.kotlin.plugin.compose") version "2.4.21" apply false
     id("com.android.application") version "8.10.1" apply false
-    id("org.jetbrains.kotlin.android") version "2.0.21" apply false
+    id("org.jetbrains.kotlin.android") version "2.4.21" apply false
     id("me.champeau.jmh") version "0.7.3" apply false
 }
 
@@ -41,7 +41,8 @@ subprojects {
         "implementation"("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")
         "implementation"("org.jetbrains.kotlinx:kotlinx-serialization-json:1.7.3")
         "implementation"("org.slf4j:slf4j-api:2.0.16")
-        "implementation"("ch.qos.logback:logback-classic:1.5.12")
+        "implementation"("ch.qos.logback:logback-classic:1.5.38")
+        "implementation"(platform("io.netty:netty-bom:4.1.137.Final"))
         "testImplementation"("org.jetbrains.kotlin:kotlin-test")
         "testImplementation"("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
         "testImplementation"("io.kotest:kotest-runner-junit5:5.9.1")

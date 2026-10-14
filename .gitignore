@@ -15,6 +15,7 @@ local.properties
 .env.*
 !.env.example
 backups/
+docs/ticker-soak-summary.json
 *.hprof
 *.msi
 *.apk

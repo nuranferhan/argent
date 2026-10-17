@@ -71,7 +71,7 @@ data class AppConfig(
             val seedDemoFunds = (System.getenv("SEED_DEMO_FUNDS") ?: simulationDefaults.toString()).toBooleanStrictOrNull()
                 ?: error("SEED_DEMO_FUNDS must be true or false")
             val marketFeedMode = runCatching {
-                MarketFeedMode.valueOf((System.getenv("MARKET_DATA_MODE") ?: "SIMULATED").trim().uppercase())
+                MarketFeedMode.valueOf((System.getenv("MARKET_DATA_MODE") ?: "BINANCE_PUBLIC").trim().uppercase())
             }.getOrElse {
                 error("MARKET_DATA_MODE must be SIMULATED or BINANCE_PUBLIC")
             }

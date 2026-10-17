@@ -301,7 +301,12 @@ class ArgentApi(var baseUrl: String = "http://127.0.0.1:8080") {
 @Serializable data class BinanceTestnetOrderDto(
     val symbol: String, val orderId: Long, val clientOrderId: String? = null,
     val price: String, val origQty: String, val executedQty: String, val status: String,
-    val timeInForce: String? = null, val type: String, val side: String, val transactTime: Long? = null
+    val timeInForce: String? = null, val type: String, val side: String, val transactTime: Long? = null,
+    val cummulativeQuoteQty: String? = null, val fills: List<com.argent.terminal.api.BinanceTestnetFillDto> = emptyList(),
+    val ledgerSynced: Boolean = false
+)
+@Serializable data class BinanceTestnetFillDto(
+    val price: String, val qty: String, val commission: String, val commissionAsset: String, val tradeId: Long? = null
 )
 @Serializable data class BistReplayRequestDto(val csv: String, val speed: Int = 1000)
 @Serializable data class BistReplayDto(

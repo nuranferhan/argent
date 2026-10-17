@@ -49,6 +49,7 @@ import com.argent.gateway.mm.MarketMakerControlStore
 import com.argent.gateway.order.OrderRepository
 import com.argent.gateway.ratelimit.RedisRateLimiter
 import com.argent.gateway.trading.TradingService
+import com.argent.gateway.trading.BinanceTestnetExecutionService
 import com.argent.ledger.LedgerService
 import com.argent.market.EventBroker
 import com.argent.market.MarketDataService
@@ -147,6 +148,16 @@ fun main() {
     val trading = TradingService(engine, ledger, risk, orders, market, prometheus)
     val limiter = RedisRateLimiter(config.redisUrl)
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    val binanceTestnetExecution = BinanceTestnetExecutionService(database, ledger, binanceTestnet).also { it.initSchema() }
+    if (binanceTestnet.configured) {
+        appScope.launch {
+            while (true) {
+                delay(5.seconds)
+                runCatching { binanceTestnetExecution.syncActive() }
+                    .onFailure { log.warn("Binance Testnet background sync will retry", it) }
+            }
+        }
+    }
 
     bootstrap(config, auth, ledger)
     runBlocking {
@@ -571,7 +582,7 @@ fun main() {
                 get("/api/v1/admin/binance-spot-testnet") {
                     val p = call.principal<ArgentPrincipal>()!!
                     if (p.role != UserRole.ADMIN.name) return@get call.respond(HttpStatusCode.Forbidden, ErrorResponse("Admin only"))
-                    call.respond(BinanceTestnetStatusResponse(configured = binanceTestnet.configured))
+                    call.respond(BinanceTestnetStatusResponse(configured = binanceTestnet.configured, usesArgentLedger = binanceTestnet.configured))
                 }
                 post("/api/v1/admin/binance-spot-testnet/orders") {
                     val p = call.principal<ArgentPrincipal>()!!
@@ -579,7 +590,7 @@ fun main() {
                     if (!binanceTestnet.configured) return@post call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse("Configure Binance Spot Testnet credentials locally first"))
                     val body = call.receive<BinanceTestnetOrderRequest>()
                     try {
-                        val result = binanceTestnet.placeOrder(TestnetOrderRequest(
+                        val result = binanceTestnetExecution.place(p.accountId, TestnetOrderRequest(
                             symbol = body.symbol,
                             side = body.side,
                             type = body.type,
@@ -600,7 +611,7 @@ fun main() {
                     if (!binanceTestnet.configured) return@get call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse("Configure Binance Spot Testnet credentials locally first"))
                     val symbol = call.request.queryParameters["symbol"] ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("symbol query parameter is required"))
                     val orderId = call.parameters["orderId"]?.toLongOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("orderId must be numeric"))
-                    try { call.respond(binanceTestnet.getOrder(symbol, orderId)) }
+                    try { call.respond(binanceTestnetExecution.get(p.accountId, symbol, orderId)) }
                     catch (failure: BinanceTestnetException) {
                         val status = if (failure.upstreamStatus in 400..499) HttpStatusCode.BadRequest else HttpStatusCode.BadGateway
                         call.respond(status, ErrorResponse(failure.message ?: "Binance Spot Testnet request failed"))
@@ -612,7 +623,7 @@ fun main() {
                     if (!binanceTestnet.configured) return@delete call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse("Configure Binance Spot Testnet credentials locally first"))
                     val symbol = call.request.queryParameters["symbol"] ?: return@delete call.respond(HttpStatusCode.BadRequest, ErrorResponse("symbol query parameter is required"))
                     val orderId = call.parameters["orderId"]?.toLongOrNull() ?: return@delete call.respond(HttpStatusCode.BadRequest, ErrorResponse("orderId must be numeric"))
-                    try { call.respond(binanceTestnet.cancelOrder(symbol, orderId)) }
+                    try { call.respond(binanceTestnetExecution.cancel(p.accountId, symbol, orderId)) }
                     catch (failure: BinanceTestnetException) {
                         val status = if (failure.upstreamStatus in 400..499) HttpStatusCode.BadRequest else HttpStatusCode.BadGateway
                         call.respond(status, ErrorResponse(failure.message ?: "Binance Spot Testnet request failed"))
@@ -770,6 +781,7 @@ private fun bootstrap(config: AppConfig, auth: AuthService, ledger: LedgerServic
             listOf(
                 "TRY" to "5000000",
                 "USDT" to "250000",
+                "BNB" to "100",
                 "THYAO" to "8000",
                 "GARAN" to "8000",
                 "ASELS" to "8000"

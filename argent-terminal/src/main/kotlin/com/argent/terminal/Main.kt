@@ -95,6 +95,7 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.math.BigDecimal
+import java.util.Locale
 import java.math.RoundingMode
 import java.util.UUID
 
@@ -502,7 +503,8 @@ private fun WorkspaceDialog(
                             }
                         }) { Text(if (marketMaker!!.enabled) "KILL SWITCH" else "Yeniden başlat", color = if (marketMaker!!.enabled) ArgentRed else ArgentGreen) }
                     }
-                    Text("Binance Spot Testnet · gerçek para yok · ARGENT bakiyesini kullanmaz", color = ArgentGold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("Binance Spot Testnet · gerçek para yok · gerçekleşen emirler ARGENT sanal bakiyesine yansır", color = ArgentGold, fontSize = 12.sp, fontWeight = FontWeight.Bold)
+                    Text("Emir gönderilince ARGENT varlığı geçici rezerve edilir. Testnet gerçekleşmeleri ve komisyonları bakiyeye yazılır; iptal veya tamamlanmada kullanılmayan rezerv serbest kalır.", color = ArgentMuted, fontSize = 11.sp)
                     Text(
                         when (testnet?.configured) {
                             true -> "Testnet anahtarları yerel gateway ortamında yapılandırılmış. Emirler yalnızca Binance test ağına gönderilir."
@@ -533,7 +535,7 @@ private fun WorkspaceDialog(
                                             clientOrderId = "ag-${java.util.UUID.randomUUID().toString().replace("-", "")}"
                                         ))
                                         onTestnetOrderChanged(result)
-                                        onFlash("Testnet ${result.status} · #${result.orderId}")
+                                        onFlash("Testnet ${result.status} · ${if (result.ledgerSynced) "fill ARGENT defterine işlendi" else "ARGENT defterinde inceleme gerekiyor"} · #${result.orderId}")
                                     } finally {
                                         testnetSubmitting = false
                                     }
@@ -546,7 +548,13 @@ private fun WorkspaceDialog(
                                 }) { Text("Test emrini iptal et", color = ArgentRed) }
                             }
                         }
-                        testnetOrder?.let { order -> Text("${order.symbol} ${order.side} · ${order.status} · ${order.executedQty}/${order.origQty} · testnet #${order.orderId}", color = ArgentSilver, fontSize = 11.sp) }
+                        testnetOrder?.let { order ->
+                            Text(
+                                "${order.symbol} ${order.side} · ${order.status} · ${order.executedQty}/${order.origQty} · ${if (order.ledgerSynced) "fill ARGENT defterine işlendi" else "ARGENT defterinde inceleme gerekiyor"} · testnet #${order.orderId}",
+                                color = if (order.ledgerSynced) ArgentSilver else ArgentRed,
+                                fontSize = 11.sp
+                            )
+                        }
                         error?.let { Text("Testnet sonucu: $it", color = ArgentRed, fontSize = 11.sp) }
                     }
                     Text("BIST: fiyat akışı simüledir. Yalnızca kullanım hakkınız olan CSV verisini yönetici replay API'siyle içe aktarın; gerçek zamanlı BIST verisi veya BIST emri değildir.", color = ArgentMuted, fontSize = 10.sp)
@@ -727,32 +735,44 @@ private fun ChartPanel(symbol: String, ticker: TickerDto?, points: List<Float>, 
             Text("bid ${book.bestBid ?: ticker?.bid ?: "—"}   ask ${book.bestAsk ?: ticker?.ask ?: "—"}", color = ArgentMuted, fontSize = 12.sp, fontFamily = FontFamily.Monospace)
         }
         Spacer(Modifier.height(8.dp))
-        Canvas(Modifier.fillMaxSize()) {
-            if (points.size < 2) return@Canvas
-            val min = points.min()
-            val max = points.max().coerceAtLeast(min + 0.0001f)
-            repeat(4) { i ->
-                val y = size.height * i / 3f
-                drawLine(ArgentLine.copy(alpha = 0.55f), Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
-            }
-            val path = Path()
-            val fill = Path()
-            points.forEachIndexed { i, v ->
-                val x = size.width * i / (points.size - 1).coerceAtLeast(1)
-                val y = size.height - ((v - min) / (max - min) * size.height)
-                if (i == 0) {
-                    path.moveTo(x, y)
-                    fill.moveTo(x, size.height)
-                    fill.lineTo(x, y)
-                } else {
-                    path.lineTo(x, y)
-                    fill.lineTo(x, y)
+        val safePoints = points.ifEmpty { listOf(ticker?.price?.toFloatOrNull() ?: 0f) }
+        val rawMin = safePoints.minOrNull() ?: 0f
+        val rawMax = safePoints.maxOrNull() ?: rawMin
+        val padding = ((rawMax - rawMin) * 0.08f).coerceAtLeast(kotlin.math.abs(rawMax) * 0.0005f).coerceAtLeast(0.01f)
+        val min = rawMin - padding
+        val max = rawMax + padding
+        val axisValues = (0..4).map { i -> max - (max - min) * i / 4f }
+        Row(Modifier.weight(1f).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.width(68.dp).fillMaxHeight(), verticalArrangement = Arrangement.SpaceBetween) {
+                axisValues.forEach { value ->
+                    Text(String.format(Locale.US, "%.2f", value), color = ArgentMuted, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
                 }
             }
-            fill.lineTo(size.width, size.height)
-            fill.close()
-            drawPath(fill, Brush.verticalGradient(listOf(ArgentGold.copy(alpha = 0.28f), Color.Transparent)))
-            drawPath(path, ArgentGold, style = Stroke(width = 2.4f))
+            Canvas(Modifier.weight(1f).fillMaxHeight()) {
+                repeat(5) { i ->
+                    val y = size.height * i / 4f
+                    drawLine(ArgentLine.copy(alpha = 0.65f), Offset(0f, y), Offset(size.width, y), strokeWidth = 1f)
+                }
+                if (points.size >= 2) {
+                    val path = Path()
+                    val fill = Path()
+                    points.forEachIndexed { i, v ->
+                        val x = size.width * i / (points.size - 1).coerceAtLeast(1)
+                        val y = size.height - ((v - min) / (max - min) * size.height)
+                        if (i == 0) { path.moveTo(x, y); fill.moveTo(x, size.height); fill.lineTo(x, y) }
+                        else { path.lineTo(x, y); fill.lineTo(x, y) }
+                    }
+                    fill.lineTo(size.width, size.height)
+                    fill.close()
+                    drawPath(fill, Brush.verticalGradient(listOf(ArgentGold.copy(alpha = 0.28f), Color.Transparent)))
+                    drawPath(path, ArgentGold, style = Stroke(width = 2.4f))
+                }
+            }
+        }
+        Row(Modifier.fillMaxWidth().padding(start = 68.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("1", color = ArgentMuted, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+            Text(((points.size + 1) / 2).coerceAtLeast(1).toString(), color = ArgentMuted, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
+            Text(points.size.coerceAtLeast(1).toString(), color = ArgentMuted, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
         }
     }
 }
@@ -903,7 +923,7 @@ private fun BottomDock(
         when (tab) {
             0 -> PortfolioTab(portfolio, tickers)
             1 -> OrdersTab(orders, api, scope, onFlash)
-            2 -> TradesTab(fills)
+            2 -> TradesTab(fills, orders)
             else -> TradesTab(blotter)
         }
     }
@@ -973,12 +993,13 @@ private fun OrdersTab(
     scope: kotlinx.coroutines.CoroutineScope,
     onFlash: (String) -> Unit
 ) {
-    if (orders.isEmpty()) {
-        Text("Açık veya geçmiş emir yok.", color = ArgentMuted, modifier = Modifier.padding(12.dp), fontSize = 12.sp)
+    val openOrders = orders.filter { it.status in setOf("PENDING", "ACCEPTED", "PARTIALLY_FILLED") && (it.remainingQuantity.toBigDecimalOrNull()?.signum() ?: 0) > 0 }
+    if (openOrders.isEmpty()) {
+        Text("Bekleyen veya açık emir yok. Tamamlanan ve iptal edilen emirler işlem geçmişinde yer alır.", color = ArgentMuted, modifier = Modifier.padding(12.dp), fontSize = 12.sp)
         return
     }
     LazyColumn(Modifier.padding(8.dp)) {
-        items(orders) { o ->
+        items(openOrders) { o ->
             Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                 Text(
                     "${o.symbol} ${o.side} ${o.type} ${compact(o.quantity)}@${o.price ?: "MKT"}  ${o.status}  filled ${compact(o.filledQuantity)}",
@@ -1001,12 +1022,20 @@ private fun OrdersTab(
 }
 
 @Composable
-private fun TradesTab(trades: List<TradeDto>) {
-    if (trades.isEmpty()) {
-        Text("Bu görünümde işlem yok.", color = ArgentMuted, modifier = Modifier.padding(12.dp), fontSize = 12.sp)
+private fun TradesTab(trades: List<TradeDto>, orders: List<OrderDto> = emptyList()) {
+    val openOrders = orders.filter { it.status in setOf("PENDING", "ACCEPTED", "PARTIALLY_FILLED") && (it.remainingQuantity.toBigDecimalOrNull()?.signum() ?: 0) > 0 }
+    if (trades.isEmpty() && openOrders.isEmpty()) {
+        Text("Devam eden emir veya işlem geçmişi yok.", color = ArgentMuted, modifier = Modifier.padding(12.dp), fontSize = 12.sp)
         return
     }
     LazyColumn(Modifier.padding(8.dp)) {
+        if (openOrders.isNotEmpty()) {
+            item { Text("DEVAM EDEN EMİRLER", color = ArgentGold, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 5.dp)) }
+            items(openOrders) { o ->
+                Text("${o.symbol} ${o.side} ${o.type} · ${o.status} · kalan ${compact(o.remainingQuantity)} · ${o.price ?: "MKT"}", color = ArgentSilver, fontSize = 12.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(vertical = 2.dp))
+            }
+        }
+        if (trades.isNotEmpty()) item { Text("GERÇEKLEŞEN İŞLEMLER", color = ArgentGold, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp, bottom = 5.dp)) }
         items(trades) { t ->
             Text(
                 "${t.symbol}  ${compact(t.quantity)} @ ${compact(t.price)}  ${t.id.take(8)}",

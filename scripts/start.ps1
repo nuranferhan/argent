@@ -78,7 +78,7 @@ if (-not $env:SEED_MARKET_MAKER) {
     $env:SEED_MARKET_MAKER = "true"
 }
 if (-not $env:SEED_DEMO_FUNDS) { $env:SEED_DEMO_FUNDS = "true" }
-if (-not $env:MARKET_DATA_MODE) { $env:MARKET_DATA_MODE = "SIMULATED" }
+if (-not $env:MARKET_DATA_MODE) { $env:MARKET_DATA_MODE = "BINANCE_PUBLIC" }
 
 Write-Host "Starting PostgreSQL, Redis, RabbitMQ, Prometheus, Grafana..."
 $composeExitCode = Invoke-Docker -Arguments @("compose", "up", "-d")

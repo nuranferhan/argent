@@ -312,6 +312,94 @@ class LedgerService(
         }
     }
 
+    /**
+     * Settles one Binance Spot Testnet execution against a locally held amount.
+     * Fill IDs are persisted in Settlements so repeated order polling cannot apply
+     * the same exchange execution twice. The external custody and fee accounts
+     * keep every asset journal balanced while the user's available/held balances
+     * and position reflect the testnet fill.
+     */
+    fun settleBinanceTestnetFill(
+        executionId: String,
+        holdId: String,
+        userId: String,
+        symbol: String,
+        side: String,
+        baseAsset: String,
+        quoteAsset: String,
+        quantity: BigDecimal,
+        quoteQuantity: BigDecimal,
+        commission: BigDecimal,
+        commissionAsset: String
+    ): Boolean {
+        require(executionId.length in 1..64) { "Execution id must contain 1 to 64 characters" }
+        require(quantity > BigDecimal.ZERO && quoteQuantity > BigDecimal.ZERO) { "Fill amounts must be positive" }
+        require(commission >= BigDecimal.ZERO) { "Commission cannot be negative" }
+        val normalizedSide = side.uppercase()
+        require(normalizedSide in setOf("BUY", "SELL")) { "Invalid testnet fill side" }
+        val feeAsset = commissionAsset.uppercase()
+        val normalizedBase = baseAsset.uppercase()
+        val normalizedQuote = quoteAsset.uppercase()
+        return transaction(db) {
+            if (Settlements.selectAll().where { Settlements.tradeId eq "binance-testnet:$executionId" }.firstOrNull() != null) {
+                return@transaction false
+            }
+            Settlements.insert {
+                it[Settlements.tradeId] = "binance-testnet:$executionId"
+                it[createdAt] = Instant.now().toEpochMilli()
+            }
+            val baseFee = if (feeAsset == normalizedBase) commission else BigDecimal.ZERO
+            val quoteFee = if (feeAsset == normalizedQuote) commission else BigDecimal.ZERO
+            val txId = UUID.randomUUID().toString()
+            if (normalizedSide == "BUY") {
+                val quoteDebit = quoteQuantity + quoteFee
+                val netBase = quantity - baseFee
+                require(netBase >= BigDecimal.ZERO) { "Base-asset commission exceeds the filled quantity" }
+                consumeHold(holdId, userId, normalizedQuote, quoteDebit)
+                if (netBase > BigDecimal.ZERO) creditAvailable(userId, normalizedBase, netBase)
+                journal(txId, userId, normalizedQuote, quoteDebit, BigDecimal.ZERO, "Binance Testnet buy quote execution=$executionId")
+                journal(txId, "BINANCE_TESTNET_CUSTODY", normalizedQuote, BigDecimal.ZERO, quoteQuantity, "Binance Testnet quote received execution=$executionId")
+                if (quoteFee > BigDecimal.ZERO) {
+                    journal(txId, "BINANCE_TESTNET_FEES", normalizedQuote, BigDecimal.ZERO, quoteFee, "Binance Testnet quote fee execution=$executionId")
+                }
+                journal(txId, "BINANCE_TESTNET_CUSTODY", normalizedBase, quantity, BigDecimal.ZERO, "Binance Testnet base delivered execution=$executionId")
+                if (netBase > BigDecimal.ZERO) journal(txId, userId, normalizedBase, BigDecimal.ZERO, netBase, "Binance Testnet buy base execution=$executionId")
+                if (baseFee > BigDecimal.ZERO) journal(txId, "BINANCE_TESTNET_FEES", normalizedBase, BigDecimal.ZERO, baseFee, "Binance Testnet base fee execution=$executionId")
+                val externalFee = commission - baseFee - quoteFee
+                if (externalFee > BigDecimal.ZERO) {
+                    debitAvailable(userId, feeAsset, externalFee)
+                    journal(txId, userId, feeAsset, externalFee, BigDecimal.ZERO, "Binance Testnet fee execution=$executionId")
+                    journal(txId, "BINANCE_TESTNET_FEES", feeAsset, BigDecimal.ZERO, externalFee, "Binance Testnet external fee execution=$executionId")
+                }
+                assertTxBalanced(txId)
+                if (netBase > BigDecimal.ZERO) {
+                    applyPosition(userId, symbol, netBase, quoteDebit.divide(netBase, 18, java.math.RoundingMode.HALF_UP))
+                }
+            } else {
+                val baseDebit = quantity + baseFee
+                val netQuote = quoteQuantity - quoteFee
+                require(netQuote >= BigDecimal.ZERO) { "Quote-asset commission exceeds the proceeds" }
+                consumeHold(holdId, userId, normalizedBase, baseDebit)
+                if (netQuote > BigDecimal.ZERO) creditAvailable(userId, normalizedQuote, netQuote)
+                journal(txId, userId, normalizedBase, baseDebit, BigDecimal.ZERO, "Binance Testnet sell base execution=$executionId")
+                journal(txId, "BINANCE_TESTNET_CUSTODY", normalizedBase, BigDecimal.ZERO, quantity, "Binance Testnet base received execution=$executionId")
+                if (baseFee > BigDecimal.ZERO) journal(txId, "BINANCE_TESTNET_FEES", normalizedBase, BigDecimal.ZERO, baseFee, "Binance Testnet base fee execution=$executionId")
+                journal(txId, "BINANCE_TESTNET_CUSTODY", normalizedQuote, quoteQuantity, BigDecimal.ZERO, "Binance Testnet quote paid execution=$executionId")
+                if (netQuote > BigDecimal.ZERO) journal(txId, userId, normalizedQuote, BigDecimal.ZERO, netQuote, "Binance Testnet sell quote execution=$executionId")
+                if (quoteFee > BigDecimal.ZERO) journal(txId, "BINANCE_TESTNET_FEES", normalizedQuote, BigDecimal.ZERO, quoteFee, "Binance Testnet quote fee execution=$executionId")
+                val externalFee = commission - baseFee - quoteFee
+                if (externalFee > BigDecimal.ZERO) {
+                    debitAvailable(userId, feeAsset, externalFee)
+                    journal(txId, userId, feeAsset, externalFee, BigDecimal.ZERO, "Binance Testnet fee execution=$executionId")
+                    journal(txId, "BINANCE_TESTNET_FEES", feeAsset, BigDecimal.ZERO, externalFee, "Binance Testnet external fee execution=$executionId")
+                }
+                assertTxBalanced(txId)
+                applyPosition(userId, symbol, baseDebit.negate(), netQuote.divide(baseDebit, 18, java.math.RoundingMode.HALF_UP))
+            }
+            true
+        }
+    }
+
     fun verifyInvariant(): Boolean = transaction(db) {
         val totals = JournalEntries.selectAll()
             .groupBy { it[JournalEntries.asset] }
@@ -325,13 +413,13 @@ class LedgerService(
 
     /**
      * Reconciles each user/asset balance (available + held) against that account's
-     * net journal balance. SYSTEM and LEGACY_UNASSIGNED are control accounts and
-     * intentionally have no spendable balance row.
+     * net journal balance. Custody, fee and legacy accounts are controls and have
+     * no spendable balance row.
      */
     fun verifyReconciliation(): Boolean = reconciliationReport().ok
 
     fun reconciliationReport(): ReconciliationReport = transaction(db) {
-        val controlAccounts = setOf("SYSTEM", "LEGACY_UNASSIGNED")
+        val controlAccounts = setOf("SYSTEM", "LEGACY_UNASSIGNED", "BINANCE_TESTNET_CUSTODY", "BINANCE_TESTNET_FEES")
         val journalNet = JournalEntries.selectAll()
             .filter { it[JournalEntries.account] !in controlAccounts }
             .groupBy { it[JournalEntries.account] to it[JournalEntries.asset] }
@@ -463,6 +551,14 @@ class LedgerService(
         } else {
             writeBalance(existing, existing[Balances.available] + amount, existing[Balances.held])
         }
+    }
+
+    private fun debitAvailable(userId: String, asset: String, amount: BigDecimal) {
+        require(amount >= BigDecimal.ZERO) { "Debit amount cannot be negative" }
+        if (amount == BigDecimal.ZERO) return
+        val current = lockBalance(userId, asset) ?: throw IllegalStateException("No $asset balance for testnet commission")
+        if (current[Balances.available] < amount) throw IllegalStateException("Insufficient available $asset for Binance Testnet commission")
+        writeBalance(current, current[Balances.available] - amount, current[Balances.held])
     }
 
     private fun lockBalance(userId: String, asset: String) =

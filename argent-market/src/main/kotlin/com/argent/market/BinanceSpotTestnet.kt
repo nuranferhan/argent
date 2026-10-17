@@ -77,6 +77,20 @@ class BinanceSpotTestnet(
         return signed("GET", "/api/v3/order", linkedMapOf("symbol" to safeSymbol(symbol), "orderId" to orderId.toString()))
     }
 
+    suspend fun getOrderByClientOrderId(symbol: String, clientOrderId: String): TestnetOrder {
+        requireConfigured()
+        require(clientOrderId.length in 1..36 && clientOrderId.matches(Regex("[A-Za-z0-9._:-]+"))) {
+            "clientOrderId must be 1-36 safe characters"
+        }
+        return signed("GET", "/api/v3/order", linkedMapOf("symbol" to safeSymbol(symbol), "origClientOrderId" to clientOrderId))
+    }
+
+    suspend fun trades(symbol: String, orderId: Long): List<BinanceTestnetTrade> {
+        requireConfigured()
+        require(orderId > 0) { "orderId must be positive" }
+        return signed("GET", "/api/v3/myTrades", linkedMapOf("symbol" to safeSymbol(symbol), "orderId" to orderId.toString()))
+    }
+
     suspend fun cancelOrder(symbol: String, orderId: Long): TestnetOrder {
         requireConfigured()
         require(orderId > 0) { "orderId must be positive" }
@@ -199,7 +213,32 @@ data class TestnetOrder(
     val timeInForce: String? = null,
     val type: String,
     val side: String,
-    val transactTime: Long? = null
+    val transactTime: Long? = null,
+    val cummulativeQuoteQty: String? = null,
+    val fills: List<BinanceTestnetFill> = emptyList(),
+    val ledgerSynced: Boolean = false
+)
+
+@Serializable
+data class BinanceTestnetFill(
+    val price: String,
+    val qty: String,
+    val commission: String,
+    val commissionAsset: String,
+    val tradeId: Long? = null
+)
+
+@Serializable
+data class BinanceTestnetTrade(
+    val id: Long,
+    val orderId: Long,
+    val price: String,
+    val qty: String,
+    val quoteQty: String,
+    val commission: String,
+    val commissionAsset: String,
+    val isBuyer: Boolean,
+    val time: Long
 )
 
 class BinanceTestnetException(val upstreamStatus: Int, message: String) : RuntimeException(message)

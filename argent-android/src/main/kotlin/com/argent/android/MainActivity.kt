@@ -57,9 +57,11 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.argent.terminal.api.ArgentApi
+import com.argent.terminal.api.DepthLevelDto
 import com.argent.terminal.api.HealthDto
 import com.argent.terminal.api.InstrumentDto
 import com.argent.terminal.api.MeResponse
@@ -74,6 +76,7 @@ import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import java.util.UUID
+import java.util.Locale
 
 private val Ink = Color(0xFF0B0E12)
 private val Panel = Color(0xFF151A21)
@@ -225,6 +228,25 @@ private fun TradePage(api: ArgentApi, instruments: List<InstrumentDto>, symbol: 
     var type by remember { mutableStateOf("LIMIT") }
     var quantity by remember { mutableStateOf("1") }
     var price by remember { mutableStateOf("") }
+    val instrument = instruments.firstOrNull { it.symbol == symbol }
+    val quantityValue = quantity.trim().replace(',', '.').toBigDecimalOrNull()
+    val priceValue = price.trim().replace(',', '.').toBigDecimalOrNull()
+    val lotSize = instrument?.lotSize?.toBigDecimalOrNull()
+    val tickSize = instrument?.tickSize?.toBigDecimalOrNull()
+    val validation = when {
+        instrument == null -> "Enstrüman bilgisi yükleniyor."
+        quantityValue == null || quantityValue.signum() <= 0 -> "Miktar pozitif bir sayı olmalı."
+        lotSize != null && quantityValue.remainder(lotSize).signum() != 0 -> "Miktar lot adımına uygun değil (${instrument.lotSize})."
+        type == "MARKET" && ticker?.price?.toBigDecimalOrNull() == null -> "Piyasa fiyatı henüz alınmadı."
+        type != "MARKET" && (priceValue == null || priceValue.signum() <= 0) -> "Fiyat pozitif bir sayı olmalı."
+        type != "MARKET" && tickSize != null && priceValue!!.remainder(tickSize).signum() != 0 -> "Fiyat tick adımına uygun değil (${instrument.tickSize})."
+        else -> null
+    }
+    val notional = runCatching {
+        val px = if (type == "MARKET") ticker?.price ?: "0" else price.ifBlank { "0" }
+        java.math.BigDecimal(px).multiply(java.math.BigDecimal(quantity.ifBlank { "0" }))
+            .setScale(2, java.math.RoundingMode.HALF_UP).toPlainString()
+    }.getOrElse { "—" }
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         item {
             Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -239,9 +261,10 @@ private fun TradePage(api: ArgentApi, instruments: List<InstrumentDto>, symbol: 
                         Spacer(Modifier.width(12.dp)); Text(ticker?.price ?: "—", color = Gold, fontSize = 22.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.weight(1f)); Text(ticker?.source ?: "SANDBOX", color = Muted, fontSize = 9.sp)
                     }
+                    instrument?.let { Text("${it.displayName} · tick ${it.tickSize} · lot ${it.lotSize}", color = Muted, fontSize = 10.sp) }
                     Text("Bid ${ticker?.bid ?: book.bestBid ?: "—"}   Ask ${ticker?.ask ?: book.bestAsk ?: "—"}", color = Muted, fontSize = 11.sp)
                     Spacer(Modifier.height(8.dp))
-                    PriceChart(prices, Modifier.fillMaxWidth().height(150.dp))
+                    PriceChart(prices, Modifier.fillMaxWidth().height(168.dp))
                 }
             }
         }
@@ -263,15 +286,20 @@ private fun TradePage(api: ArgentApi, instruments: List<InstrumentDto>, symbol: 
                     Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) { listOf("LIMIT", "MARKET", "IOC", "FOK").forEach { Choice(it, type == it) { type = it } } }
                     if (type != "MARKET") Field("Fiyat", price, { price = it }, KeyboardType.Decimal)
                     Field("Miktar", quantity, { quantity = it }, KeyboardType.Decimal)
-                    Text("Tahmini nominal: ${runCatching { (price.ifBlank { ticker?.price ?: "0" }.replace(',', '.')).toBigDecimal().multiply(quantity.replace(',', '.').toBigDecimal()) }.getOrNull() ?: "—"}", color = Muted, fontSize = 11.sp)
-                    Button(enabled = !busy, onClick = {
+                    Text("Tahmini notional  $notional", color = Muted, fontSize = 11.sp)
+                    validation?.let { Text(it, color = Red, fontSize = 11.sp) }
+                    Button(enabled = !busy && validation == null, onClick = {
                         onBusy(true)
                         scope.launch {
                             try {
                                 val normalizedQuantity = quantity.trim().replace(',', '.')
                                 val normalizedPrice = price.trim().replace(',', '.').ifBlank { null }
                                 require(normalizedQuantity.toBigDecimal() > java.math.BigDecimal.ZERO) { "Miktar sıfırdan büyük olmalı." }
+                                val activeInstrument = requireNotNull(instrument) { "Enstrüman bilgisi yüklenemedi." }
+                                lotSize?.let { require(normalizedQuantity.toBigDecimal().remainder(it).signum() == 0) { "Miktar lot adımına uygun değil (${activeInstrument.lotSize})." } }
+                                if (type == "MARKET") require(ticker?.price?.toBigDecimalOrNull() != null) { "Piyasa fiyatı henüz alınmadı." }
                                 if (type != "MARKET") require(!normalizedPrice.isNullOrBlank() && normalizedPrice.toBigDecimal() > java.math.BigDecimal.ZERO) { "Fiyat sıfırdan büyük olmalı." }
+                                if (type != "MARKET" && tickSize != null) require(normalizedPrice!!.toBigDecimal().remainder(tickSize).signum() == 0) { "Fiyat tick adımına uygun değil (${activeInstrument.tickSize})." }
                                 val result = api.placeOrder(symbol, side, type, normalizedQuantity, normalizedPrice, UUID.randomUUID().toString())
                                 onMessage("${result.status} · dolan ${result.filledQuantity} · ${result.reason}")
                                 onRefresh()
@@ -324,20 +352,27 @@ private fun PortfolioPage(p: PortfolioDto?) {
 private fun OrdersPage(orders: List<OrderDto>, fills: List<TradeDto>, api: ArgentApi, onMessage: (String) -> Unit) {
     val scope = rememberCoroutineScope()
     var tab by remember { mutableStateOf(0) }
+    val openOrders = orders.filter { it.status in setOf("PENDING", "ACCEPTED", "PARTIALLY_FILLED") && (it.remainingQuantity.toBigDecimalOrNull()?.signum() ?: 0) > 0 }
     Column(Modifier.fillMaxSize().padding(12.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Choice("AÇIK EMİRLER", tab == 0) { tab = 0 }; Choice("İŞLEMLER", tab == 1) { tab = 1 } }
         LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (tab == 0) items(orders) { order ->
+            if (tab == 0) items(openOrders) { order ->
                 Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
                     Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
                         Column(Modifier.weight(1f)) { Text("${order.symbol} ${order.side} ${order.type}", fontWeight = FontWeight.Bold); Text("${order.status} · ${order.filledQuantity}/${order.quantity} · ${order.price ?: "piyasa"}", color = Muted, fontSize = 11.sp) }
-                        if (order.status in setOf("NEW", "PARTIALLY_FILLED", "OPEN")) TextButton(onClick = { scope.launch { runCatching { api.cancel(order.id, order.symbol); onMessage("${order.symbol} emri iptal edildi") }.onFailure { onMessage("İptal hatası: ${it.message}") } } }) { Text("İPTAL", color = Red) }
+                        if (order.status in setOf("ACCEPTED", "PARTIALLY_FILLED")) TextButton(onClick = { scope.launch { runCatching { api.cancel(order.id, order.symbol); onMessage("${order.symbol} emri iptal edildi") }.onFailure { onMessage("İptal hatası: ${it.message}") } } }) { Text("İPTAL", color = Red) }
                     }
                 }
             }
-            else items(fills) { trade -> DataRow(trade.symbol, "${trade.quantity} @ ${trade.price}") }
-            if (tab == 0 && orders.isEmpty()) item { Text("Açık emir yok", color = Muted) }
-            if (tab == 1 && fills.isEmpty()) item { Text("İşlem yok", color = Muted) }
+            if (tab == 1) {
+                item { Text("DEVAM EDEN EMİRLER", color = Gold, fontWeight = FontWeight.Bold) }
+                if (openOrders.isEmpty()) item { Text("Bekleyen/açık emir yok.", color = Muted) }
+                items(openOrders) { order -> DataRow("${order.symbol} ${order.side} · ${order.status}", "Kalan ${order.remainingQuantity} · ${order.price ?: "piyasa"}") }
+                item { Text("GERÇEKLEŞEN İŞLEMLER", color = Gold, fontWeight = FontWeight.Bold) }
+                if (fills.isEmpty()) item { Text("İşlem geçmişi boş.", color = Muted) }
+                items(fills) { trade -> DataRow(trade.symbol, "${trade.quantity} @ ${trade.price}") }
+            }
+            if (tab == 0 && openOrders.isEmpty()) item { Text("Bekleyen veya açık emir yok.", color = Muted) }
         }
     }
 }
@@ -415,19 +450,40 @@ private fun WorkspacePage(api: ArgentApi, me: MeResponse, onMeChanged: (MeRespon
 
 @Composable
 private fun PriceChart(points: List<Float>, modifier: Modifier = Modifier) {
-    Canvas(modifier.background(Ink, RoundedCornerShape(10.dp)).padding(8.dp)) {
-        if (points.size < 2) return@Canvas
-        val min = points.minOrNull() ?: return@Canvas
-        val max = points.maxOrNull() ?: return@Canvas
-        val spread = (max - min).takeIf { it > 0f } ?: 1f
-        val path = Path()
-        points.forEachIndexed { i, value ->
-            val x = size.width * i / (points.size - 1)
-            val y = size.height - (value - min) / spread * size.height
-            if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+    val safePoints = points.ifEmpty { listOf(0f) }
+    val rawMin = safePoints.minOrNull() ?: 0f
+    val rawMax = safePoints.maxOrNull() ?: rawMin
+    val padding = ((rawMax - rawMin) * 0.08f).coerceAtLeast(kotlin.math.abs(rawMax) * 0.0005f).coerceAtLeast(0.01f)
+    val min = rawMin - padding
+    val max = rawMax + padding
+    val labels = (0..4).map { i -> max - (max - min) * i / 4f }
+    Column(modifier.background(Ink, RoundedCornerShape(10.dp)).padding(8.dp)) {
+        Row(Modifier.weight(1f).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
+            Column(Modifier.width(64.dp).fillMaxHeight(), verticalArrangement = Arrangement.SpaceBetween) {
+                labels.forEach { Text(String.format(Locale.US, "%.2f", it), color = Muted, fontSize = 8.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace) }
+            }
+            Canvas(Modifier.weight(1f).fillMaxHeight()) {
+                repeat(5) { i ->
+                    val y = size.height * i / 4f
+                    drawLine(Line, Offset(0f, y), Offset(size.width, y), 1f)
+                }
+                if (points.size >= 2) {
+                    val spread = max - min
+                    val path = Path()
+                    points.forEachIndexed { i, value ->
+                        val x = size.width * i / (points.size - 1)
+                        val y = size.height - (value - min) / spread * size.height
+                        if (i == 0) path.moveTo(x, y) else path.lineTo(x, y)
+                    }
+                    drawPath(path, Gold, style = Stroke(width = 2.5f))
+                }
+            }
         }
-        drawLine(Line, Offset(0f, size.height / 2), Offset(size.width, size.height / 2), 1f)
-        drawPath(path, Gold, style = Stroke(width = 2.5f))
+        Row(Modifier.fillMaxWidth().padding(start = 64.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+            Text("1", color = Muted, fontSize = 8.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+            Text(((points.size + 1) / 2).coerceAtLeast(1).toString(), color = Muted, fontSize = 8.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+            Text(points.size.coerceAtLeast(1).toString(), color = Muted, fontSize = 8.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
+        }
     }
 }
 
@@ -457,5 +513,62 @@ private fun MetricCard(title: String, value: String, detail: String) {
 private fun DataRow(title: String, detail: String) {
     Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(12.dp)) {
         Column(Modifier.fillMaxWidth().padding(13.dp)) { Text(title, fontWeight = FontWeight.SemiBold); Text(detail, color = Muted, fontSize = 11.sp) }
+    }
+}
+
+@Preview(showBackground = true)
+@Composable
+private fun TradePagePreview() {
+    MaterialTheme(
+        colorScheme = darkColorScheme(
+            primary = Gold,
+            background = Ink,
+            surface = Panel,
+            onBackground = Color(0xFFE5E8ED),
+            onSurface = Color(0xFFE5E8ED),
+            error = Red
+        )
+    ) {
+        val sampleInstruments = listOf(
+            InstrumentDto("THYAO", "THYAO", "TRY", "EQUITY", "Türk Hava Yolları", "0.05", "1"),
+            InstrumentDto("GARAN", "GARAN", "TRY", "EQUITY", "Garanti BBVA", "0.02", "1"),
+            InstrumentDto("BTCUSDT", "BTC", "USDT", "CRYPTO", "Bitcoin / USDT", "0.01", "0.001")
+        )
+        val sampleTicker = TickerDto("THYAO", "305.50", "305.25", "305.50", "1500000", "SANDBOX")
+        val sampleBook = OrderBookDto(
+            symbol = "THYAO",
+            bids = listOf(
+                DepthLevelDto("305.25", "1000", 2),
+                DepthLevelDto("305.00", "2500", 5),
+                DepthLevelDto("304.75", "1800", 3)
+            ),
+            asks = listOf(
+                DepthLevelDto("305.50", "800", 1),
+                DepthLevelDto("305.75", "3000", 4),
+                DepthLevelDto("306.00", "1200", 2)
+            ),
+            bestBid = "305.25",
+            bestAsk = "305.50"
+        )
+        val samplePrices = listOf(300f, 301f, 302.5f, 302f, 304f, 303.5f, 305f, 305.5f)
+        val sampleTrades = listOf(
+            TradeDto("1", "THYAO", "305.50", "100", "b1", "s1"),
+            TradeDto("2", "THYAO", "305.25", "500", "b2", "s2")
+        )
+
+        TradePage(
+            api = remember { ArgentApi() },
+            instruments = sampleInstruments,
+            symbol = "THYAO",
+            onSymbol = {},
+            ticker = sampleTicker,
+            book = sampleBook,
+            prices = samplePrices,
+            trades = sampleTrades,
+            busy = false,
+            onMessage = {},
+            onBusy = {},
+            onRefresh = {}
+        )
     }
 }

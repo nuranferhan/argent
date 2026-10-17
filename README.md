@@ -1,10 +1,12 @@
 # ARGENT — Multi-Asset Trading & Settlement Platform
 
+![Kotlin](https://img.shields.io/badge/Kotlin-7F52FF?logo=kotlin&logoColor=white) ![JDK 21](https://img.shields.io/badge/JDK-21-007396?logo=openjdk&logoColor=white) ![Ktor](https://img.shields.io/badge/Ktor-087CFA) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white) ![Redis](https://img.shields.io/badge/Redis-DC382D?logo=redis&logoColor=white) ![RabbitMQ](https://img.shields.io/badge/RabbitMQ-FF6600?logo=rabbitmq&logoColor=white) ![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white) ![Compose](https://img.shields.io/badge/Compose-Desktop%20%2B%20Android-4285F4?logo=jetpackcompose&logoColor=white)
+
 BIST hisseleri ve kripto paritelerini tek çatı altında işleyen; emir eşleştirme, canlı veri, portföy/risk ve çift girişli muhasebeyi olay tabanlı bir mimaride birleştiren mini borsa + aracı kurum.
 
 **JDK 21 · Kotlin · Ktor · PostgreSQL · Redis · RabbitMQ · Compose Desktop + Android**
 
-Yerel ve ücretsiz çalışma kipinde piyasa adaptörü sentetik sandbox verisi üretir; dış API/anahtar gerekmez. İsteğe bağlı `BINANCE_PUBLIC` modu ücretsiz Binance public kripto kotasyonlarını okur. Admin tarafından ayrıca yapılandırıldığında **Binance Spot Testnet** emir gönderme, sorgulama ve iptal akışını test eder. Testnet emirleri ARGENT'in iç defterine veya ledger'ına girmez ve gerçek para değildir. BIST fiyatları varsayılan olarak simüledir; yerel CSV replay yalnızca kullanıcının kullanım hakkı olan verilerle çalışır. Bu proje gerçek borsa erişimi, lisanslı canlı BIST verisi veya müşteri fonu saklama hizmeti sunmaz.
+Varsayılan yerel çalışma kipinde ARGENT ücretsiz Binance public WebSocket'inden kripto kotasyonlarını alır; API anahtarı gerekmez, internet bağlantısı gerekir. BIST fiyatları simüledir. İnternetsiz geliştirme için `MARKET_DATA_MODE=SIMULATED` seçilebilir. Emirler ARGENT'in dahili eşleştirme motorunda işlenir; Binance public veri kipinde dışarı emir gönderilmez. Admin tarafından ayrıca yapılandırıldığında **Binance Spot Testnet** emir gönderme, sorgulama ve iptal akışını test eder. Testnet fill'leri ARGENT'in dahili eşleştirme motoruna girmez; gerçekleşen miktarlar, komisyonlar ve ayrılan/kalan rezerv ARGENT'in sanal ledger'ına işlenir. Bu sanal başlangıç bakiyesi Binance Testnet bakiyesinin içe aktarımı değildir; gerçek para değildir. Yerel CSV replay yalnızca kullanıcının kullanım hakkı olan verilerle çalışır. Bu proje gerçek borsa erişimi, lisanslı canlı BIST verisi veya müşteri fonu saklama hizmeti sunmaz.
 
 ## Çalıştırmadan önce (Windows 11)
 
@@ -14,7 +16,7 @@ Yerel ve ücretsiz çalışma kipinde piyasa adaptörü sentetik sandbox verisi 
 | JDK 21 | Evet | `java -version` → 21 |
 | `JWT_SECRET` | Yerelde varsayılan var | En az 32 karakter. Üretim/staging'de zorunlu ve gizli yönetilmeli |
 | `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` | Evet | İlk veritabanı kurulumunda admin oluşturulur; mevcut veritabanında mevcut admin bilgileriyle giriş yapılır |
-| Dış veri API anahtarı | **Hayır** | Varsayılan stokastik sandbox feed; istenirse ücretsiz Binance public market-data modu |
+| Dış veri API anahtarı | **Hayır** | Kriptoda varsayılan ücretsiz Binance public market-data akışı; internet gerekir. BIST simüledir |
 | Binance emir API anahtarı | **Hayır** | Yalnızca ayrıca etkinleştirilen Spot Testnet için isteğe bağlı; production URL/kodu yok |
 | `.env` içine kart / özel anahtar | **Hayır** | |
 
@@ -40,10 +42,9 @@ Docker Compose içindeki Postgres/Redis/Rabbit/Grafana şifreleri **yalnızca lo
 
 ## Tek komutla ayağa kaldırma
 
-Proje kökü: `C:\Users\Lenovo\Projects\argent`
+Depoyu klonlayın ve PowerShell'i depo kök dizininde açın:
 
 ```powershell
-cd C:\Users\Lenovo\Projects\argent
 .\scripts\start-stack.ps1
 ```
 
@@ -88,11 +89,12 @@ veya makinede `gradle` yoksa [Gradle 8.11.1](https://gradle.org/releases/) kurup
 
 ## Çalışma kipleri ve sınırlar
 
-- Normal yerel açılış `MARKET_DATA_MODE=SIMULATED` ile tüm tanımlı kripto ve BIST sembollerine sentetik sandbox fiyatı üretir; API anahtarı veya dış piyasa servisi gerekmez.
+- Varsayılan yerel açılış `MARKET_DATA_MODE=BINANCE_PUBLIC` ile tanımlı kripto paritelerine Binance public WebSocket kotasyonu, BIST sembollerine sentetik sandbox fiyatı sağlar; Binance API anahtarı gerekmez, internet gerekir.
+- İnternetsiz çalışma için `MARKET_DATA_MODE=SIMULATED` tüm tanımlı kripto ve BIST sembollerine sentetik sandbox fiyatı üretir.
 - Simülasyon kipi sabit tohumlu, sembol başına stokastik fiyat yolu kullanır; bu üretilmiş fiyatlar gerçek piyasa kotasyonu değildir ve gerçek emir yürütme/uyum yerine geçmez.
-- İsteğe bağlı `MARKET_DATA_MODE=BINANCE_PUBLIC`, kripto piyasa verisini Binance public WebSocket'ten alır ve BIST sembolleri için sentetik sandbox verisi kullanır; emirler dışarı iletilmez.
-- Binance Spot Testnet emirleri yalnızca `BINANCE_SPOT_TESTNET_API_KEY` ve `BINANCE_SPOT_TESTNET_SECRET` yerel ortam değişkenleri birlikte ayarlanırsa açılır. Bu anahtarlar sadece Testnet API izinleriyle oluşturulmalı ve `.env` içinde tutulmalıdır; `.env` Git tarafından ignore edilir. API endpoint'i production host'a gönderemez. Testnet uçları yalnızca global ADMIN'e açıktır; siparişler ARGENT bakiyesi/ledger'ı değiştirmez. Testnet hesabında sanal fon bulunması gerekir.
-- Desktop `Çalışma alanı` penceresindeki Binance Spot Testnet bölümü etkinlik durumunu gösterir ve test emri gönderme, durum sorgulama, iptal işlemlerini sunar. LIMIT emirlerde GTC/IOC/FOK; ayrıca MARKET emri desteklenir. Bu bölüm yalnızca Binance test ağına işlem gönderir.
+- `MARKET_DATA_MODE=BINANCE_PUBLIC`, kripto piyasa verisini Binance public WebSocket'ten alır ve BIST sembolleri için sentetik sandbox verisi kullanır; emirler dışarı iletilmez.
+- Binance Spot Testnet emirleri yalnızca `BINANCE_SPOT_TESTNET_API_KEY` ve `BINANCE_SPOT_TESTNET_SECRET` yerel ortam değişkenleri birlikte ayarlanırsa açılır. Bu anahtarlar sadece Testnet API izinleriyle oluşturulmalı ve `.env` içinde tutulmalıdır; `.env` Git tarafından ignore edilir. API endpoint'i production host'a gönderemez. Testnet uçları yalnızca global ADMIN'e açıktır; Binance Testnet'te gerçekleşen fill'ler ledger'da tekilleştirilerek işlenir. Testnet hesabında da sanal fon bulunması gerekir.
+- Desktop `Çalışma alanı` penceresindeki Binance Spot Testnet bölümü etkinlik durumunu gösterir ve test emri gönderme, durum sorgulama, iptal işlemlerini sunar. LIMIT emirlerde GTC/IOC/FOK; ayrıca MARKET emri desteklenir. Emir gönderiminde ARGENT'te gereken varlık geçici rezerve edilir; fill'ler ve komisyonlar ledger'a, iptal/tamamlanmada kullanılmayan rezerv kullanılabilir bakiyeye döner. Gateway açıkken açık emirler periyodik olarak sorgulanır; yansıtmada bir sorun olursa rezerv otomatik çözülmez ve durum inceleme için işaretlenir. ARGENT'in demo başlangıç tutarları Binance Testnet bakiyesini otomatik kopyalamaz.
 - BIST varsayılanı `SIMULATED` kalır. Admin'in `POST /api/v1/admin/market-data/bist/replay` çağrısı, `timestamp,symbol,price[,volume24h]` başlıklı kullanıcı CSV'sini zaman sıralı olarak ticker akışına oynatır; timestamp Unix milisaniye veya ISO-8601 olabilir. Yalnızca tanımlı EQUITY sembolleri kabul edilir (azami 50.000 satır/2 MiB); `speed` alanı zaman aralıklarını böler (varsayılan 1000), replay sürerken BIST simülatörü duraklar. Durum: `GET /api/v1/admin/market-data/bist/replay`. CSV örneği ve komut [docs/market-data.md](docs/market-data.md) içinde. Replay özelliği veri lisansı sağlamaz; veri kaynağının kullanım/yeniden dağıtım koşullarını kullanıcı doğrular.
 - Aynı kullanıcının alış/satış emirlerinin çapraz defter oluşturmasını önlemek için kendi bekleyen likiditesiyle kesişen yeni emir taker seviyesinde iptal edilir.
 - Para yatırma/çekme API uçları, harici sağlayıcı ve mutabakat entegrasyonu olmadığı için `503 Service Unavailable` döndürür; ledger bakiyesini tek başına değiştirmez.
@@ -179,7 +181,7 @@ Invoke-RestMethod http://127.0.0.1:8080/api/v1/admin/ledger/reconciliation -Head
 - `POST /api/v1/admin/replay/{symbol}` (ADMIN, event log'u izole kitapta doğrular; canlı kitabı değiştirmez)
 - `GET /api/v1/admin/ledger/reconciliation` (ADMIN, kullanıcı hesabı/varlık bazında journal neti ile available+held toplamını karşılaştırır; uyuşmazlık varsa hesap kimliği ve fark değerlerini döndürür)
 - `GET /api/v1/admin/binance-spot-testnet` (ADMIN; yalnızca yapılandırılmış/yapılandırılmamış bilgisini verir, anahtarları döndürmez)
-- `POST /api/v1/admin/binance-spot-testnet/orders`, `GET|DELETE /api/v1/admin/binance-spot-testnet/orders/{orderId}?symbol=BTCUSDT` (ADMIN, Spot Testnet, ARGENT ledger'ından ayrı)
+- `POST /api/v1/admin/binance-spot-testnet/orders`, `GET|DELETE /api/v1/admin/binance-spot-testnet/orders/{orderId}?symbol=BTCUSDT` (ADMIN; emir Binance Spot Testnet'e gönderilir, fill'ler ARGENT ledger'ına yansıtılır)
 - `POST|GET /api/v1/admin/market-data/bist/replay` (ADMIN, yerel CSV historical replay başlatma/durum)
 - `GET /api/v1/admin/market-maker`, `POST /api/v1/admin/market-maker/kill-switch|resume` (global ADMIN; kill switch bot emirlerini iptal eder)
 - Market maker stale quotes are cancelled after 10 seconds; `MM_MAX_QUOTE_NOTIONAL` caps each quote and `MM_MAX_INVENTORY_NOTIONAL` caps bot-held base inventory value per symbol. Sell quotes are limited to available ledger inventory.

@@ -2,6 +2,10 @@
 
 ARGENT has three separate functions here: simulated prices, caller-supplied BIST history replay, and orders to Binance's Spot Testnet. None provides live BIST quotes or real-money execution.
 
+## Public crypto prices
+
+The local default is `MARKET_DATA_MODE=BINANCE_PUBLIC`. It reads public crypto tickers from Binance's WebSocket without API credentials; the gateway needs internet access. BIST equities continue to use ARGENT's simulated feed. This public stream is market data only: regular ARGENT orders still use the internal matching engine. Set `MARKET_DATA_MODE=SIMULATED` to run without internet. Binance Spot Testnet execution is configured separately with its own Testnet-only credentials.
+
 ## Binance Spot Testnet
 
 Create credentials specifically for Binance Spot Testnet by following Binance's [official Spot Testnet terms and documentation](https://developers.binance.com/en/docs/products/spot/testnet/TESTNET-TERMS-OF-USE). Do not use a production key. Keep both values in the ignored local `.env` file at the repository root:
@@ -17,7 +21,11 @@ Never commit `.env`, paste credentials in chat, or enable withdrawals on any API
 docker compose --profile app up -d --build gateway
 ```
 
-After the gateway is healthy, sign in to the desktop as the global `ADMIN` and open **Çalışma alanı**. The Spot Testnet panel reports whether credentials are configured. LIMIT (GTC/IOC/FOK) and MARKET orders, status lookups, and cancellation go only to `https://testnet.binance.vision`. ARGENT does not persist those external orders, reserve ARGENT balances for them, or settle their fills in its ledger. Testnet balances and executions are managed by Binance's sandbox.
+After the gateway is healthy, sign in to the desktop as the global `ADMIN` and open **Çalışma alanı**. The Spot Testnet panel reports whether credentials are configured. LIMIT (GTC/IOC/FOK) and MARKET orders, status lookups, and cancellation go only to `https://testnet.binance.vision`.
+
+For a newly submitted testnet order, ARGENT records the client/order mapping locally and reserves the required simulated asset before sending the request. It fetches Binance's per-order trade executions and applies each fill exactly once to the ARGENT ledger, including base/quote commissions and third-asset commissions when that asset has enough simulated available balance. Partial fills update balances while the open remainder stays reserved. Cancellation or terminal completion releases the unspent reserve. A background poller continues syncing active orders while the gateway runs and resumes tracked active orders after restart. If fill history is incomplete or a commission cannot be settled locally, the order is marked `SETTLEMENT_REVIEW` and the hold remains in place for safety.
+
+ARGENT's seeded development balances are **not imported from Binance Testnet** and therefore do not necessarily equal the starting Testnet wallet. After executions, ARGENT mirrors the fill deltas and commissions into its own simulated balances; Binance separately enforces its Testnet wallet funds. Testnet balances and actual orders remain in Binance's sandbox, and no real money is used.
 
 The gateway uses a single local Testnet key pair, so access is ADMIN-only. It is intended for a local development instance, not a shared/public deployment. The key and secret are read from environment variables and are never returned by the status endpoint or deliberately written to logs. The Testnet host is a constant in code; there is no configurable production endpoint.
 

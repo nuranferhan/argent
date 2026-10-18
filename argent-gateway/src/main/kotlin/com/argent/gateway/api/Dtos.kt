@@ -165,6 +165,21 @@ data class TradeInfo(
 )
 
 @Serializable
+data class AssistantQuestionRequest(val question: String, val symbol: String? = null)
+
+@Serializable
+data class AssistantStatusResponse(val enabled: Boolean, val provider: String, val model: String? = null)
+
+@Serializable
+data class AssistantAnswerResponse(
+    val answer: String,
+    val generatedAt: Long,
+    val dataAsOf: Long,
+    val sources: List<String>,
+    val marketMode: String
+)
+
+@Serializable
 data class OrderResultResponse(
     val orderId: String,
     val status: String,

@@ -70,6 +70,10 @@ Android istemcisi Kotlin ve Jetpack Compose ile aynı gateway API'sini kullanır
 
 APK: `argent-android\build\outputs\apk\debug\argent-android-debug.apk`. Emülatörde gateway URL `http://10.0.2.2:8080`; USB ile bağlı telefonda yükleme betiği `adb reverse tcp:8080 tcp:8080` kurar ve uygulamada `http://127.0.0.1:8080` kullanılabilir. Debug yapısı yerel HTTP gateway'e izin verir; release manifesti açık metin trafiğini kapatır, dolayısıyla release/staging sunucusu HTTPS kullanmalıdır. Debug APK yalnızca yerel sandbox içindir, imzalı yayın paketi değildir.
 
+### ARGENT AI Asistanı
+
+Terminal ve Android'deki ARGENT AI sekmesi varsayılan olarak kapalıdır. Ücretsiz plan kotası olan Groq sağlayıcısına bağlamak için `console.groq.com` üzerinden API anahtarı oluşturup `.env` dosyasındaki `ARGENT_AI_API_KEY` değerine ekleyin; varsayılan URL ve model Groq uyumludur. Ücretsiz planın model ve kullanım kotaları sağlayıcı tarafından değiştirilebilir. Gateway'i yeniden oluşturun (`docker compose --profile app up -d --build gateway`). Asistan portföy, emir/işlem geçmişi ve seçili piyasa verisini yanıt üretmek için Groq'a iletir. Sağlayıcının belgelerine göre çıkarım verileri varsayılan olarak saklanmaz; güvenilirlik/abuse incelemesi için istisnai durumlarda 30 güne kadar geçici kayıt olabilir. Gerçek kişisel/finansal verileri ücretsiz dış servise göndermeyin; ARGENT demo hesap verileriyle kullanın. Anahtar boşken hesap verisi sağlayıcıya gönderilmez. Asistan yalnızca okur ve açıklar; emir gönderemez, iptal edemez veya bakiye değiştiremez. Sohbette kaynak, piyasa modu ve veri zamanı gibi teknik bilgiler gösterilmez. Günlük karşılaştırma veya sıra dışı bakiye değişimi gibi geçmiş veri gerektiren sorularda ilgili tarihsel veri yoksa asistan bunu belirtmelidir.
+
 Bu komut Docker Desktop'ı, JDK 21'i ve internet bağlantısını gerektirir. Alternatif olarak gateway'i Gradle ile çalıştırmak için altyapıyı ayrı başlatın:
 
 ```powershell

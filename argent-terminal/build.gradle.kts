@@ -31,8 +31,11 @@ compose.desktop {
         nativeDistributions {
             targetFormats(TargetFormat.Msi)
             packageName = "Argent"
-            packageVersion = "1.0.6"
+            packageVersion = "1.0.7"
             description = "ARGENT Multi-Asset Trading Terminal"
+            windows {
+                iconFile.set(project.file("src/main/resources/argent-icon.ico"))
+            }
         }
     }
 }

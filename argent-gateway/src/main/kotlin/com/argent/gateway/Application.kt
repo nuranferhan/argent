@@ -38,8 +38,11 @@ import com.argent.gateway.api.RegisterResponse
 import com.argent.gateway.api.TickerResponse
 import com.argent.gateway.api.TokenResponse
 import com.argent.gateway.api.TradeInfo
+import com.argent.gateway.api.AssistantQuestionRequest
+import com.argent.gateway.api.AssistantStatusResponse
 import com.argent.gateway.api.WithdrawRequest
 import com.argent.gateway.auth.AuthService
+import com.argent.gateway.assistant.ReadOnlyAssistantService
 import com.argent.gateway.auth.UserRole
 import com.argent.gateway.auth.TenantRole
 import com.argent.gateway.config.AppConfig
@@ -144,6 +147,7 @@ fun main() {
     val market = MarketDataService(feedMode = config.marketFeedMode).also { it.start() }
     val binanceTestnet = BinanceSpotTestnet(config.binanceSpotTestnetApiKey, config.binanceSpotTestnetSecret)
     val risk = RiskService(ledger)
+    val assistant = ReadOnlyAssistantService.fromEnvironment()
     val prometheus = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
     val trading = TradingService(engine, ledger, risk, orders, market, prometheus)
     val limiter = RedisRateLimiter(config.redisUrl)
@@ -161,7 +165,10 @@ fun main() {
 
     bootstrap(config, auth, ledger)
     runBlocking {
+        val recoveryStartedAt = System.nanoTime()
+        log.info("Loading domain event history for recovery")
         val history = eventStore.loadAll()
+        log.info("Loaded {} domain events in {} ms", history.size, (System.nanoTime() - recoveryStartedAt) / 1_000_000)
         val replayableOrderIds = history.filterIsInstance<OrderSubmitted>().map { it.order.id }.toSet()
         val replayedEvents = mutableListOf<com.argent.common.events.DomainEvent>()
         // Replay is read-only with respect to the durable event store. Capture its
@@ -172,8 +179,12 @@ fun main() {
             keepRecordedEvents = false,
             rollbackOnMutationFailure = false
         )
+        val replayStartedAt = System.nanoTime()
         val recoveredOrders = recoveryEngine.replay(history)
-        recoveredOrders.associateBy { it.id }.values.forEach(orders::save)
+        log.info("Replayed {} domain events into {} order snapshots in {} ms", history.size, recoveredOrders.size, (System.nanoTime() - replayStartedAt) / 1_000_000)
+        val persistStartedAt = System.nanoTime()
+        orders.saveAll(recoveredOrders.associateBy { it.id }.values)
+        log.info("Persisted recovered orders in {} ms", (System.nanoTime() - persistStartedAt) / 1_000_000)
         trading.recoverUnsettled(replayedEvents.filterIsInstance<TradeExecuted>())
         recoveryEngine.shutdown()
 
@@ -269,6 +280,7 @@ fun main() {
                 "/api/v1/auth/register" -> "auth:register" to 5
                 "/api/v1/auth/register/invitation" -> "auth:invitation" to 10
                 "/api/v1/auth/refresh" -> "auth:refresh" to 20
+                "/api/v1/assistant/chat" -> "api:assistant" to 20
                 else -> if (call.request.httpMethod == HttpMethod.Get) {
                     // The desktop terminal polls several read endpoints every second. A single
                     // IP-wide 120/minute bucket throttles normal UI use (and users behind NAT).
@@ -498,6 +510,43 @@ fun main() {
                 get("/api/v1/portfolio") {
                     val p = call.principal<ArgentPrincipal>()!!
                     call.respond(risk.portfolio(p.accountId, market.allLastPrices()))
+                }
+                get("/api/v1/assistant/status") {
+                    call.respond(AssistantStatusResponse(assistant.enabled, assistant.statusProvider(), if (assistant.enabled) assistant.model else null))
+                }
+                post("/api/v1/assistant/chat") {
+                    val p = call.principal<ArgentPrincipal>()!!
+                    if (!assistant.enabled) {
+                        return@post call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse("ARGENT AI yapılandırılmamış; gateway ortamına ARGENT_AI_API_KEY ekleyin."))
+                    }
+                    val request = call.receive<AssistantQuestionRequest>()
+                    val question = request.question.trim()
+                    if (question.isBlank() || question.length > 1200) {
+                        return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("Soru boş olamaz ve 1200 karakteri aşamaz."))
+                    }
+                    val symbol = request.symbol?.trim()?.uppercase()?.takeIf(String::isNotBlank)
+                    if (symbol != null && Instruments.all.none { it.symbol == symbol }) {
+                        return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("Bilinmeyen sembol: $symbol"))
+                    }
+                    val ticker = symbol?.let(market::lastTicker)
+                    val marketMode = "CRYPTO ${market.cryptoFeedStatus()} · BIST SIMULATED"
+                    val answer = runCatching {
+                        assistant.answer(
+                            question = question,
+                            symbol = symbol,
+                            portfolio = risk.portfolio(p.accountId, market.allLastPrices()),
+                            orders = orders.findByUser(p.accountId, 100),
+                            fills = orders.findTrades(userId = p.accountId, limit = 100),
+                            ticker = ticker,
+                            recentPrices = symbol?.let(market::history).orEmpty(),
+                            depth = symbol?.let { engine.depth(it, 5) },
+                            marketMode = marketMode
+                        )
+                    }.getOrElse {
+                        log.warn("Read-only ARGENT AI request failed: {}", it.message)
+                        return@post call.respond(HttpStatusCode.BadGateway, ErrorResponse(it.message ?: "ARGENT AI yanıt veremedi."))
+                    }
+                    call.respond(answer)
                 }
                 get("/api/v1/orders") {
                     val p = call.principal<ArgentPrincipal>()!!

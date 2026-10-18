@@ -43,6 +43,7 @@ class MatchingEngine(
         data class Snapshot(val reply: CompletableDeferred<List<Order>>) : EngineCommand()
         data class Restore(val order: Order, val reply: CompletableDeferred<Boolean>) : EngineCommand()
         data class Clear(val reply: CompletableDeferred<Boolean>) : EngineCommand()
+        data class Replay(val events: List<DomainEvent>, val reply: CompletableDeferred<List<Order>>) : EngineCommand()
     }
 
     data class SubmitResult(
@@ -83,7 +84,7 @@ class MatchingEngine(
                 val book = books.computeIfAbsent(symbol) { OrderBook(symbol) }
                 for (cmd in channel) {
                     val mutating = cmd is EngineCommand.Submit || cmd is EngineCommand.Cancel ||
-                        cmd is EngineCommand.Restore || cmd is EngineCommand.Clear
+                        cmd is EngineCommand.Restore || cmd is EngineCommand.Clear || cmd is EngineCommand.Replay
                     val snapshot = if (mutating && rollbackOnMutationFailure) book.snapshotOrders() else null
                     val clientOrdersSnapshot = if (snapshot != null) {
                         processedClientOrders.filterKeys { it.startsWith("${symbol}:") }
@@ -119,6 +120,27 @@ class MatchingEngine(
                             processedClientOrders.keys.removeIf { it.startsWith("${symbol}:") }
                             cmd.reply.complete(true)
                         }
+                        is EngineCommand.Replay -> {
+                            val recovered = mutableListOf<Order>()
+                            for (event in cmd.events) {
+                                when (event) {
+                                    is OrderSubmitted -> {
+                                        val eventBook = books.computeIfAbsent(event.order.symbol) { OrderBook(event.order.symbol) }
+                                        recovered += submitInto(eventBook, event.order).order
+                                    }
+                                    is OrderCancelled -> {
+                                        val eventBook = books.computeIfAbsent(event.aggregateId) { OrderBook(event.aggregateId) }
+                                        val cancelled = eventBook.cancel(event.orderId)
+                                        if (cancelled != null) {
+                                            publish(OrderCancelled(aggregateId = event.aggregateId, sequence = nextSeq(), orderId = event.orderId))
+                                            recovered += cancelled
+                                        }
+                                    }
+                                    else -> Unit
+                                }
+                            }
+                            cmd.reply.complete(recovered)
+                        }
                     }
                     } catch (cause: Exception) {
                         if (snapshot != null) {
@@ -136,6 +158,7 @@ class MatchingEngine(
                             is EngineCommand.Snapshot -> cmd.reply.completeExceptionally(cause)
                             is EngineCommand.Restore -> cmd.reply.completeExceptionally(cause)
                             is EngineCommand.Clear -> cmd.reply.completeExceptionally(cause)
+                            is EngineCommand.Replay -> cmd.reply.completeExceptionally(cause)
                         }
                     }
                 }
@@ -144,7 +167,10 @@ class MatchingEngine(
     }
 
     private fun handleSubmit(book: OrderBook, cmd: EngineCommand.Submit) {
-        val order = cmd.order
+        cmd.reply.complete(submitInto(book, cmd.order))
+    }
+
+    private fun submitInto(book: OrderBook, order: Order): SubmitResult {
         publish(OrderSubmitted(aggregateId = order.symbol, sequence = nextSeq(), order = order))
 
         val clientId = order.clientOrderId
@@ -161,8 +187,7 @@ class MatchingEngine(
                         reason = "Duplicate clientOrderId"
                     )
                 )
-                cmd.reply.complete(SubmitResult(rejected, emptyList(), false, "Duplicate clientOrderId: $existing"))
-                return
+                return SubmitResult(rejected, emptyList(), false, "Duplicate clientOrderId: $existing")
             }
         }
 
@@ -188,13 +213,11 @@ class MatchingEngine(
                 publish(TradeExecuted(aggregateId = order.symbol, sequence = nextSeq(), trade = t))
             }
         }
-        cmd.reply.complete(
-            SubmitResult(
-                order = result.order,
-                trades = result.trades,
-                accepted = accepted,
-                reason = result.reason
-            )
+        return SubmitResult(
+            order = result.order,
+            trades = result.trades,
+            accepted = accepted,
+            reason = result.reason
         )
     }
 
@@ -246,20 +269,18 @@ class MatchingEngine(
     fun recordedEvents(): List<DomainEvent> = if (keepRecordedEvents) eventLog.toList() else emptyList()
 
     suspend fun replay(events: List<DomainEvent>): List<Order> {
-        val recovered = mutableListOf<Order>()
-        for (event in events) {
-            when (event) {
-                is OrderSubmitted -> recovered += submit(event.order).order
-                is OrderCancelled -> cancel(event.aggregateId, event.orderId)?.let(recovered::add)
-                else -> Unit
-            }
-        }
-        return recovered
+        val reply = CompletableDeferred<List<Order>>()
+        getOrCreateActor(REPLAY_ACTOR).send(EngineCommand.Replay(events, reply))
+        return reply.await()
     }
 
     fun shutdown() {
         actors.values.forEach { it.close() }
         scope.cancel()
+    }
+
+    private companion object {
+        const val REPLAY_ACTOR = "__argent_event_replay__"
     }
 
     class EventPersistenceException(message: String, cause: Throwable) : RuntimeException(message, cause)

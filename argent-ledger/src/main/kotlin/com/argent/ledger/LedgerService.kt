@@ -401,14 +401,23 @@ class LedgerService(
     }
 
     fun verifyInvariant(): Boolean = transaction(db) {
-        val totals = JournalEntries.selectAll()
-            .groupBy { it[JournalEntries.asset] }
-        totals.values.all { rows ->
-            val (debit, credit) = rows.fold(BigDecimal.ZERO to BigDecimal.ZERO) { acc, row ->
-                acc.first + row[JournalEntries.debit] to acc.second + row[JournalEntries.credit]
+        // Aggregate inside the database. Loading every journal row into Kotlin made
+        // the public health endpoint take seconds as the journal grew.
+        exec(
+            """
+            SELECT asset, SUM(debit) AS debit_total, SUM(credit) AS credit_total
+            FROM journal_entries
+            GROUP BY asset
+            """.trimIndent()
+        ) { resultSet ->
+            var balanced = true
+            while (resultSet.next()) {
+                val debit = resultSet.getBigDecimal("debit_total") ?: BigDecimal.ZERO
+                val credit = resultSet.getBigDecimal("credit_total") ?: BigDecimal.ZERO
+                if (debit.compareTo(credit) != 0) balanced = false
             }
-            debit.compareTo(credit) == 0
-        }
+            balanced
+        } ?: false
     }
 
     /**

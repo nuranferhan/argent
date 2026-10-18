@@ -141,6 +141,9 @@ class ArgentApi(var baseUrl: String = "http://127.0.0.1:8080") {
     suspend fun portfolio(): PortfolioDto = get("/api/v1/portfolio")
     suspend fun orders(): List<OrderDto> = get("/api/v1/orders")
     suspend fun fills(): List<TradeDto> = get("/api/v1/fills")
+    suspend fun assistantStatus(): AssistantStatusDto = get("/api/v1/assistant/status")
+    suspend fun askAssistant(question: String, symbol: String? = null): AssistantAnswerDto =
+        post("/api/v1/assistant/chat", AssistantQuestionDto(question, symbol))
     suspend fun publicTrades(symbol: String): List<TradeDto> = get("/api/v1/trades?symbol=$symbol")
 
     suspend fun placeOrder(
@@ -378,6 +381,15 @@ class ArgentApi(var baseUrl: String = "http://127.0.0.1:8080") {
     val makerOrderId: String = "",
     val takerOrderId: String = "",
     val executedAt: Long = 0
+)
+@Serializable data class AssistantStatusDto(val enabled: Boolean, val provider: String, val model: String? = null)
+@Serializable data class AssistantQuestionDto(val question: String, val symbol: String? = null)
+@Serializable data class AssistantAnswerDto(
+    val answer: String,
+    val generatedAt: Long,
+    val dataAsOf: Long,
+    val sources: List<String> = emptyList(),
+    val marketMode: String
 )
 @Serializable data class PlaceOrderRequest(
     val symbol: String,

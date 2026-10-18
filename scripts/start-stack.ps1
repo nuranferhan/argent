@@ -77,17 +77,27 @@ if ($composeExitCode -ne 0) { throw "Docker Compose failed (exit $composeExitCod
 
 Write-Host "Waiting for ARGENT API..."
 $ready = $false
-for ($i = 0; $i -lt 150; $i++) {
+$lastHealth = "No health response received yet."
+$startedAt = Get-Date
+$deadline = $startedAt.AddMinutes(5)
+$nextProgress = $startedAt.AddSeconds(30)
+while (-not $ready -and (Get-Date) -lt $deadline) {
     try {
-        $health = Invoke-RestMethod "http://127.0.0.1:8080/health" -TimeoutSec 2
+        $health = Invoke-RestMethod "http://127.0.0.1:8080/health" -TimeoutSec 15
+        $lastHealth = $health | ConvertTo-Json -Compress
         if ($health.status -eq "UP") { $ready = $true; break }
-    } catch { }
-    if (($i + 1) % 15 -eq 0) {
-        Write-Host "Gateway is still recovering; waited $((($i + 1) * 2)) seconds..."
+    } catch {
+        $lastHealth = $_.Exception.Message
     }
-    if ($i -lt 149) { Start-Sleep -Seconds 2 }
+    if ((Get-Date) -ge $nextProgress) {
+        $elapsed = [int]((New-TimeSpan -Start $startedAt -End (Get-Date)).TotalSeconds)
+        Write-Host "Gateway is still recovering; waited $elapsed seconds. Last health result: $lastHealth"
+        $nextProgress = (Get-Date).AddSeconds(30)
+    }
+    if ((Get-Date) -lt $deadline) { Start-Sleep -Seconds 2 }
 }
 if (-not $ready) {
+    Write-Host "Last health result: $lastHealth"
     Invoke-Docker -Arguments @("compose", "--profile", "app", "logs", "--tail", "80", "gateway") | Out-Null
     throw "ARGENT API did not become healthy. Check the gateway logs above."
 }

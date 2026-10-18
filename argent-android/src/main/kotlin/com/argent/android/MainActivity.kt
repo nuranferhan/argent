@@ -4,23 +4,29 @@ import android.os.Bundle
 import androidx.activity.ComponentActivity
 import androidx.activity.compose.setContent
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.horizontalScroll
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -55,6 +61,7 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
@@ -155,9 +162,10 @@ private fun LoginScreen(api: ArgentApi, onLogin: (MeResponse) -> Unit) {
     }
 }
 
-private enum class Page(val title: String) { TRADE("Piyasa"), PORTFOLIO("Portföy"), ORDERS("Emirler"), WORKSPACE("Çalışma alanı") }
+private enum class Page(val title: String) { TRADE("Piyasa"), PORTFOLIO("Portföy"), ORDERS("Emirler"), ASSISTANT("AI"), WORKSPACE("Çalışma alanı") }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun MainScreen(api: ArgentApi, initialMe: MeResponse, onMeChanged: (MeResponse) -> Unit, onLogout: () -> Unit) {
     val scope = rememberCoroutineScope()
     var me by remember { mutableStateOf(initialMe) }
@@ -171,6 +179,7 @@ private fun MainScreen(api: ArgentApi, initialMe: MeResponse, onMeChanged: (MeRe
     var fills by remember { mutableStateOf(emptyList<TradeDto>()) }
     var trades by remember { mutableStateOf(emptyList<TradeDto>()) }
     var health by remember { mutableStateOf<HealthDto?>(null) }
+    var gatewayReachable by remember { mutableStateOf(true) }
     var message by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
     val prices = remember { mutableStateListOf<Float>() }
@@ -190,14 +199,18 @@ private fun MainScreen(api: ArgentApi, initialMe: MeResponse, onMeChanged: (MeRe
     }
     LaunchedEffect(Unit) {
         while (true) {
-            runCatching { portfolio = api.portfolio(); orders = api.orders(); fills = api.fills(); health = api.health() }
+            runCatching { portfolio = api.portfolio() }
+            runCatching { orders = api.orders() }
+            runCatching { fills = api.fills() }
+            runCatching { health = api.health(); gatewayReachable = true }
+                .onFailure { gatewayReachable = false }
             delay(4_000)
         }
     }
     Scaffold(containerColor = Ink, bottomBar = {
         NavigationBar(containerColor = Panel) {
             Page.entries.forEach { item ->
-                NavigationBarItem(selected = page == item, onClick = { page = item }, icon = { Text(when (item) { Page.TRADE -> "↗"; Page.PORTFOLIO -> "◫"; Page.ORDERS -> "≡"; Page.WORKSPACE -> "⚙" }, fontSize = 20.sp) }, label = { Text(item.title, fontSize = 10.sp) })
+                NavigationBarItem(selected = page == item, onClick = { page = item }, icon = { Text(when (item) { Page.TRADE -> "↗"; Page.PORTFOLIO -> "◫"; Page.ORDERS -> "≡"; Page.ASSISTANT -> "✦"; Page.WORKSPACE -> "⚙" }, fontSize = 20.sp) }, label = { Text(item.title, fontSize = 10.sp) })
             }
         }
     }) { padding ->
@@ -206,17 +219,206 @@ private fun MainScreen(api: ArgentApi, initialMe: MeResponse, onMeChanged: (MeRe
                 Text("ARGENT", color = Gold, fontWeight = FontWeight.Black, fontSize = 20.sp)
                 Text("${me.displayName} · ${me.tenantRole}", color = Muted, fontSize = 11.sp)
             }
-            health?.let { Text("${it.status} · ${it.executionMode} · CRYPTO ${it.cryptoMarketData} · BIST ${it.bistMarketData}", color = if (it.status == "UP") Green else Red, fontSize = 10.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 6.dp)) }
+            val statusLine = when {
+                !gatewayReachable -> "GATEWAY'E BAĞLANILAMIYOR · YENİDEN DENENİYOR"
+                health == null -> "GATEWAY DURUMU KONTROL EDİLİYOR"
+                else -> "${health!!.status} · ${health!!.executionMode} · CRYPTO ${health!!.cryptoMarketData} · BIST ${health!!.bistMarketData}"
+            }
+            Text(
+                "$statusLine     •     $statusLine",
+                color = if (gatewayReachable && health?.status == "UP") Green else Red,
+                fontSize = 10.sp,
+                maxLines = 1,
+                softWrap = false,
+                modifier = Modifier.fillMaxWidth().padding(horizontal = 12.dp, vertical = 6.dp).basicMarquee()
+            )
             message?.let { Text(it, color = if (it.contains("hata", true) || it.contains("REJECTED", true)) Red else Gold, modifier = Modifier.padding(horizontal = 12.dp)) }
             when (page) {
                 Page.TRADE -> TradePage(api, instruments, symbol, { symbol = it }, ticker, book, prices, trades, busy,
                     onMessage = { message = it }, onBusy = { busy = it }, onRefresh = { portfolio = api.portfolio(); orders = api.orders() })
                 Page.PORTFOLIO -> PortfolioPage(portfolio)
                 Page.ORDERS -> OrdersPage(orders, fills, api, onMessage = { message = it })
+                Page.ASSISTANT -> AssistantScreen(api, symbol)
                 Page.WORKSPACE -> WorkspacePage(api, me, { me = it; onMeChanged(it) }, onMessage = { message = it }, onLogout = onLogout)
             }
         }
     }
+}
+
+private data class AssistantUiMessage(val fromUser: Boolean, val text: String)
+
+private sealed interface AssistantBlock {
+    data class Heading(val text: String, val level: Int) : AssistantBlock
+    data class Paragraph(val text: String) : AssistantBlock
+    data class Bullet(val text: String) : AssistantBlock
+    data class Table(val headers: List<String>, val rows: List<List<String>>) : AssistantBlock
+}
+
+@Composable
+private fun AssistantScreen(api: ArgentApi, symbol: String) {
+    val scope = rememberCoroutineScope()
+    val messages = remember { mutableStateListOf<AssistantUiMessage>() }
+    val listState = rememberLazyListState()
+    var prompt by remember { mutableStateOf("") }
+    var enabled by remember { mutableStateOf<Boolean?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { runCatching { enabled = api.assistantStatus().enabled } }
+    LaunchedEffect(messages.size, busy) {
+        if (messages.isNotEmpty()) listState.animateScrollToItem(0)
+    }
+    Column(Modifier.fillMaxSize().background(Ink).padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            Column {
+                Text("ARGENT AI", color = Gold, fontSize = 17.sp, fontWeight = FontWeight.Bold)
+                Text("Portföy · emirler · $symbol", color = Muted, fontSize = 10.sp)
+            }
+            Surface(color = Color(0x2234D399), shape = RoundedCornerShape(50)) {
+                Text("SALT OKUNUR", color = Green, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
+            }
+        }
+        Text(
+            when (enabled) {
+                true -> "ARGENT verileriyle yanıtlar · Emir veremez, bakiye değiştiremez"
+                false -> "Asistan kapalı · Gateway AI anahtarını kontrol et"
+                null -> "Asistan bağlantısı kontrol ediliyor…"
+            }, color = Muted, fontSize = 10.sp
+        )
+        if (messages.isEmpty()) {
+            Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.Center) {
+                Text("Ne öğrenmek istersin?", color = Color(0xFFE0E4E8), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
+                Text("Hesap verilerin ve seçili piyasa bilgisi üzerinden sorabilirsin.", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp, bottom = 8.dp))
+                listOf("Bugün portföyüm nasıl?", "Bekleyen emirlerimi açıkla", "$symbol piyasa özeti").forEach { suggestion ->
+                    Surface(
+                        color = Panel, shape = RoundedCornerShape(10.dp),
+                        modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp).clickable { prompt = suggestion }
+                    ) { Text(suggestion, color = Color(0xFFE0E4E8), fontSize = 12.sp, modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp)) }
+                }
+            }
+        } else {
+            LazyColumn(
+                state = listState, reverseLayout = true, modifier = Modifier.weight(1f).fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(8.dp), contentPadding = PaddingValues(vertical = 4.dp)
+            ) {
+                if (busy) item { Text("ARGENT AI yanıt hazırlıyor…", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(start = 8.dp, top = 4.dp)) }
+                items(messages.size) { index ->
+                    AssistantMessageBubble(messages[messages.lastIndex - index])
+                }
+            }
+        }
+        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = prompt, onValueChange = { prompt = it }, enabled = !busy,
+                placeholder = { Text("ARGENT'e sor…") }, minLines = 1, maxLines = 4,
+                modifier = Modifier.weight(1f),
+            )
+            Button(enabled = !busy && prompt.isNotBlank() && enabled != false, onClick = {
+                val question = prompt.trim(); prompt = ""; messages.add(AssistantUiMessage(true, question)); busy = true
+                scope.launch {
+                    try {
+                        runCatching { api.askAssistant(question, symbol) }
+                            .onSuccess { result -> messages.add(AssistantUiMessage(false, cleanAssistantAnswer(result.answer))) }
+                            .onFailure { messages.add(AssistantUiMessage(false, it.message ?: "Asistan yanıt veremedi.")) }
+                    } finally { busy = false }
+                }
+            }, modifier = Modifier.height(54.dp), colors = ButtonDefaults.buttonColors(containerColor = Gold, contentColor = Ink)) {
+                if (busy) CircularProgressIndicator(Modifier.size(18.dp), color = Ink, strokeWidth = 2.dp) else Text("Sor")
+            }
+        }
+    }
+}
+
+private fun cleanAssistantAnswer(raw: String): String {
+    val metadata = Regex(
+        "(?i)\\b(?:source|kaynak(?:\\s+verisi)?|veri\\s+kaynağı|piyasa\\s+modu|market\\s+mode|veri\\s+zaman[ıi]|data\\s+time|timestamp)\\s*:"
+    )
+    return raw.lineSequence()
+        .map { line ->
+            var clean = line.trim().replace(Regex("(?i)^ARGENT\\s+AI\\s*:\\s*"), "")
+            metadata.find(clean)?.let { marker -> clean = clean.substring(0, marker.range.first).trimEnd() }
+            clean
+        }
+        .filter(String::isNotBlank)
+        .joinToString("\n")
+        .trim()
+}
+
+@Composable
+private fun AssistantMessageBubble(message: AssistantUiMessage) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (message.fromUser) Arrangement.End else Arrangement.Start) {
+        Surface(
+            modifier = Modifier.widthIn(max = 1050.dp).fillMaxWidth(if (message.fromUser) 0.86f else 0.98f),
+            color = if (message.fromUser) Color(0xFF282615) else Panel,
+            shape = RoundedCornerShape(14.dp)
+        ) {
+            Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+                Text(if (message.fromUser) "SEN" else "ARGENT AI", color = if (message.fromUser) Gold else Green, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                AssistantFormattedAnswer(message.text)
+            }
+        }
+    }
+}
+
+@Composable
+private fun AssistantFormattedAnswer(markdown: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        assistantBlocks(markdown).forEach { block ->
+            when (block) {
+                is AssistantBlock.Heading -> Text(block.text, color = Gold, fontSize = if (block.level <= 2) 13.sp else 12.sp, fontWeight = FontWeight.Bold)
+                is AssistantBlock.Paragraph -> Text(block.text, color = Color(0xFFE0E4E8), fontSize = 12.sp, lineHeight = 18.sp)
+                is AssistantBlock.Bullet -> Row(horizontalArrangement = Arrangement.spacedBy(7.dp)) {
+                    Text("•", color = Gold, fontWeight = FontWeight.Bold)
+                    Text(block.text, color = Color(0xFFE0E4E8), fontSize = 12.sp, lineHeight = 18.sp)
+                }
+                is AssistantBlock.Table -> Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                    block.rows.forEach { row ->
+                        Surface(color = Color(0xFF101A20), shape = RoundedCornerShape(8.dp)) {
+                            Column(Modifier.fillMaxWidth().padding(8.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                                block.headers.forEachIndexed { index, heading ->
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+                                        Text(heading, color = Muted, fontSize = 10.sp, lineHeight = 14.sp, modifier = Modifier.weight(1.15f))
+                                        Text(row.getOrElse(index) { "—" }, color = Color(0xFFE0E4E8), fontSize = 11.sp, lineHeight = 15.sp, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun assistantBlocks(markdown: String): List<AssistantBlock> {
+    val lines = markdown.lines().map { it.trim().replace(Regex("^(>\\s*)+"), "").trim() }
+    val result = mutableListOf<AssistantBlock>()
+    var index = 0
+    fun clean(value: String) = value.replace("**", "").replace("__", "").replace("`", "").trim()
+    fun isTableRow(value: String) = value.trim().startsWith("|") && value.trim().endsWith("|")
+    fun cells(value: String) = value.trim().trim('|').split('|').map(::clean)
+    while (index < lines.size) {
+        val line = lines[index].trim()
+        if (line.isBlank()) { index++; continue }
+        if (isTableRow(line)) {
+            val tableLines = mutableListOf<String>()
+            while (index < lines.size && isTableRow(lines[index])) tableLines += lines[index++]
+            val rows = tableLines.map(::cells).filterNot { row -> row.all { it.matches(Regex(":?-{2,}:?")) } }
+            if (rows.size > 1) result += AssistantBlock.Table(rows.first(), rows.drop(1))
+            else rows.firstOrNull()?.forEach { result += AssistantBlock.Paragraph(it) }
+            continue
+        }
+        val heading = Regex("^(#{1,6})\\s+(.+)$").matchEntire(line)
+        if (heading != null) { result += AssistantBlock.Heading(clean(heading.groupValues[2]), heading.groupValues[1].length); index++; continue }
+        val bullet = Regex("^(?:[-*+]\\s+|\\d+[.)]\\s+)(.+)$").matchEntire(line)
+        if (bullet != null) { result += AssistantBlock.Bullet(clean(bullet.groupValues[1])); index++; continue }
+        val paragraph = mutableListOf(clean(line))
+        index++
+        while (index < lines.size && lines[index].isNotBlank() && !isTableRow(lines[index].trim()) &&
+            !Regex("^(?:#{1,6}\\s+|[-*+]\\s+|\\d+[.)]\\s+)").containsMatchIn(lines[index].trim())) {
+            paragraph += clean(lines[index]); index++
+        }
+        result += AssistantBlock.Paragraph(paragraph.joinToString(" "))
+    }
+    return result
 }
 
 @Composable
@@ -229,6 +431,7 @@ private fun TradePage(api: ArgentApi, instruments: List<InstrumentDto>, symbol: 
     var quantity by remember { mutableStateOf("1") }
     var price by remember { mutableStateOf("") }
     val instrument = instruments.firstOrNull { it.symbol == symbol }
+    val sourceBadge = if (instrument?.assetClass == "CRYPTO" && ticker?.source?.equals("binance", ignoreCase = true) == true) "BINANCE" else null
     val quantityValue = quantity.trim().replace(',', '.').toBigDecimalOrNull()
     val priceValue = price.trim().replace(',', '.').toBigDecimalOrNull()
     val lotSize = instrument?.lotSize?.toBigDecimalOrNull()
@@ -259,7 +462,8 @@ private fun TradePage(api: ArgentApi, instruments: List<InstrumentDto>, symbol: 
                     Row(verticalAlignment = Alignment.CenterVertically) {
                         Text(symbol, fontSize = 18.sp, fontWeight = FontWeight.Bold)
                         Spacer(Modifier.width(12.dp)); Text(ticker?.price ?: "—", color = Gold, fontSize = 22.sp, fontWeight = FontWeight.Bold)
-                        Spacer(Modifier.weight(1f)); Text(ticker?.source ?: "SANDBOX", color = Muted, fontSize = 9.sp)
+                        Spacer(Modifier.weight(1f))
+                        sourceBadge?.let { Text(it, color = Muted, fontSize = 9.sp) }
                     }
                     instrument?.let { Text("${it.displayName} · tick ${it.tickSize} · lot ${it.lotSize}", color = Muted, fontSize = 10.sp) }
                     Text("Bid ${ticker?.bid ?: book.bestBid ?: "—"}   Ask ${ticker?.ask ?: book.bestAsk ?: "—"}", color = Muted, fontSize = 11.sp)
@@ -328,7 +532,7 @@ private fun OrderBookCard(book: OrderBookDto, onPrice: (String) -> Unit) {
                 Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
                     val bid = bids.getOrNull(i); val ask = asks.getOrNull(i)
                     Text(bid?.let { "${it.price}  ×  ${it.quantity}" } ?: "", color = Green, modifier = Modifier.weight(1f).clickable { bid?.price?.let(onPrice) }, fontSize = 11.sp)
-                    Text(ask?.let { "${it.price}  ×  ${it.quantity}" } ?: "", color = Red, modifier = Modifier.weight(1f).clickable { ask?.price?.let(onPrice) }, fontSize = 11.sp)
+                    Text(ask?.let { "${it.price}  ×  ${it.quantity}" } ?: "", color = Red, modifier = Modifier.weight(1f).clickable { ask?.price?.let(onPrice) }, fontSize = 11.sp, textAlign = TextAlign.End)
                 }
             }
         }
@@ -338,13 +542,21 @@ private fun OrderBookCard(book: OrderBookDto, onPrice: (String) -> Unit) {
 @Composable
 private fun PortfolioPage(p: PortfolioDto?) {
     LazyColumn(Modifier.fillMaxSize().padding(12.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        item { MetricCard("Risk skoru", p?.riskScore?.toString() ?: "—", "Spot · kaldıraç/marjin kapalı") }
-        item { MetricCard("Özkaynak", p?.equity ?: "—", "Gerçekleşen PnL ${p?.realizedPnl ?: "—"} · Açık PnL ${p?.unrealizedPnl ?: "—"}") }
+        item { MetricCard("Pozisyon yoğunlaşması", "${p?.riskScore ?: "—"}%", "En büyük açık pozisyonun aynı para birimindeki toplam pozisyonlara oranı. Tek varlıkta %100; ARGENT göstergesidir, genel risk notu değildir.") }
+        if (p?.valuations.isNullOrEmpty()) {
+            item { MetricCard("Özkaynak", p?.equity ?: "—", "Gerçekleşen PnL ${p?.realizedPnl ?: "—"} · Açık PnL ${p?.unrealizedPnl ?: "—"}") }
+        } else {
+            p!!.valuations.forEach { value ->
+                item { Text("${value.quoteAsset} DEĞERLEMESİ", color = Gold, fontWeight = FontWeight.Bold) }
+                item { MetricCard("Özkaynak", "${value.equity} ${value.quoteAsset}", "Brüt maruziyet ${value.grossExposure} ${value.quoteAsset}") }
+                item { MetricCard("Gerçekleşen PnL", "${value.realizedPnl} ${value.quoteAsset}", "Değerleme ${if (value.pnlComplete) "tam" else "kısmi"}") }
+                item { MetricCard("Açık PnL", "${value.unrealizedPnl} ${value.quoteAsset}", if (value.priceComplete) "Güncel fiyatlarla hesaplandı" else "Bazı varlıklarda güncel fiyat yok; tahmin kısmi") }
+            }
+        }
         item { Text("BAKİYELER", color = Gold, fontWeight = FontWeight.Bold) }
         items(p?.balances.orEmpty()) { b -> DataRow(b.asset, "${b.available} kullanılabilir · ${b.held} blokeli") }
         item { Text("POZİSYONLAR", color = Gold, fontWeight = FontWeight.Bold) }
         items(p?.positions.orEmpty()) { pos -> DataRow(pos.symbol, "${pos.quantity} · ort. ${pos.avgEntryPrice} · PnL ${pos.realizedPnl}") }
-        p?.valuations.orEmpty().forEach { v -> item { DataRow("${v.quoteAsset} değerlemesi", "Özkaynak ${v.equity} · maruziyet ${v.grossExposure} · PnL ${if (v.pnlComplete) "tam" else "kısmi"}") } }
     }
 }
 
@@ -353,28 +565,44 @@ private fun OrdersPage(orders: List<OrderDto>, fills: List<TradeDto>, api: Argen
     val scope = rememberCoroutineScope()
     var tab by remember { mutableStateOf(0) }
     val openOrders = orders.filter { it.status in setOf("PENDING", "ACCEPTED", "PARTIALLY_FILLED") && (it.remainingQuantity.toBigDecimalOrNull()?.signum() ?: 0) > 0 }
-    Column(Modifier.fillMaxSize().padding(12.dp)) {
-        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) { Choice("AÇIK EMİRLER", tab == 0) { tab = 0 }; Choice("İŞLEMLER", tab == 1) { tab = 1 } }
-        LazyColumn(Modifier.fillMaxSize(), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (tab == 0) items(openOrders) { order ->
-                Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
-                    Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
-                        Column(Modifier.weight(1f)) { Text("${order.symbol} ${order.side} ${order.type}", fontWeight = FontWeight.Bold); Text("${order.status} · ${order.filledQuantity}/${order.quantity} · ${order.price ?: "piyasa"}", color = Muted, fontSize = 11.sp) }
-                        if (order.status in setOf("ACCEPTED", "PARTIALLY_FILLED")) TextButton(onClick = { scope.launch { runCatching { api.cancel(order.id, order.symbol); onMessage("${order.symbol} emri iptal edildi") }.onFailure { onMessage("İptal hatası: ${it.message}") } } }) { Text("İPTAL", color = Red) }
+    Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 16.dp)) {
+        Row(Modifier.padding(top = 4.dp, bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) { Choice("AÇIK EMİRLER", tab == 0) { tab = 0 }; Choice("İŞLEMLER", tab == 1) { tab = 1 } }
+        LazyColumn(Modifier.fillMaxSize().padding(top = 4.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            if (tab == 0) {
+                item { Text("AÇIK EMİRLER · ${openOrders.size} bekleyen", color = Gold, fontWeight = FontWeight.Bold) }
+                if (openOrders.isEmpty()) item { Text("Bekleyen emir yok. Tamamlanan ve iptal edilen emirler İşlemler geçmişindedir.", color = Muted) }
+                items(openOrders, key = { it.id }) { order ->
+                    Card(colors = CardDefaults.cardColors(containerColor = Panel)) {
+                        Row(Modifier.fillMaxWidth().padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
+                            Column(Modifier.weight(1f)) { Text("${order.symbol} ${order.side} ${order.type}", fontWeight = FontWeight.Bold); Text("${orderStatusLabel(order.status)} · ${order.filledQuantity}/${order.quantity} · ${order.price ?: "piyasa"}", color = Muted, fontSize = 11.sp) }
+                            if (order.status in setOf("ACCEPTED", "PARTIALLY_FILLED")) TextButton(onClick = { scope.launch { runCatching { api.cancel(order.id, order.symbol); onMessage("${order.symbol} emri iptal edildi") }.onFailure { onMessage("İptal hatası: ${it.message}") } } }) { Text("İPTAL", color = Red) }
+                        }
                     }
                 }
             }
             if (tab == 1) {
-                item { Text("DEVAM EDEN EMİRLER", color = Gold, fontWeight = FontWeight.Bold) }
-                if (openOrders.isEmpty()) item { Text("Bekleyen/açık emir yok.", color = Muted) }
-                items(openOrders) { order -> DataRow("${order.symbol} ${order.side} · ${order.status}", "Kalan ${order.remainingQuantity} · ${order.price ?: "piyasa"}") }
+                val sortedOrders = orders.sortedByDescending { it.updatedAt.takeIf { updated -> updated > 0 } ?: it.createdAt }
+                item { Text("EMİR GEÇMİŞİ", color = Gold, fontWeight = FontWeight.Bold) }
+                if (sortedOrders.isEmpty()) item { Text("Emir geçmişi boş.", color = Muted) }
+                items(sortedOrders, key = { it.id }) { order ->
+                    DataRow("${order.symbol} ${order.side} ${order.type} · ${orderStatusLabel(order.status)}", "Dolan ${order.filledQuantity}/${order.quantity} · kalan ${order.remainingQuantity} · ${order.price ?: "piyasa"}")
+                }
                 item { Text("GERÇEKLEŞEN İŞLEMLER", color = Gold, fontWeight = FontWeight.Bold) }
                 if (fills.isEmpty()) item { Text("İşlem geçmişi boş.", color = Muted) }
                 items(fills) { trade -> DataRow(trade.symbol, "${trade.quantity} @ ${trade.price}") }
             }
-            if (tab == 0 && openOrders.isEmpty()) item { Text("Bekleyen veya açık emir yok.", color = Muted) }
         }
     }
+}
+
+private fun orderStatusLabel(status: String): String = when (status.uppercase()) {
+    "ACCEPTED", "NEW", "PENDING" -> "AÇIK"
+    "PARTIALLY_FILLED" -> "KISMEN DOLDU"
+    "FILLED" -> "DOLDU"
+    "CANCELLED", "CANCELED" -> "İPTAL"
+    "REJECTED" -> "REDDEDİLDİ"
+    "EXPIRED" -> "SÜRESİ DOLDU"
+    else -> status
 }
 
 @Composable
@@ -459,8 +687,8 @@ private fun PriceChart(points: List<Float>, modifier: Modifier = Modifier) {
     val labels = (0..4).map { i -> max - (max - min) * i / 4f }
     Column(modifier.background(Ink, RoundedCornerShape(10.dp)).padding(8.dp)) {
         Row(Modifier.weight(1f).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.width(64.dp).fillMaxHeight(), verticalArrangement = Arrangement.SpaceBetween) {
-                labels.forEach { Text(String.format(Locale.US, "%.2f", it), color = Muted, fontSize = 8.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace) }
+            Column(Modifier.width(72.dp).fillMaxHeight(), verticalArrangement = Arrangement.SpaceBetween) {
+                labels.forEach { Text(String.format(Locale.US, "%.2f", it), color = Color(0xFFBAC4D1), fontSize = 9.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace, maxLines = 1) }
             }
             Canvas(Modifier.weight(1f).fillMaxHeight()) {
                 repeat(5) { i ->
@@ -479,7 +707,7 @@ private fun PriceChart(points: List<Float>, modifier: Modifier = Modifier) {
                 }
             }
         }
-        Row(Modifier.fillMaxWidth().padding(start = 64.dp), horizontalArrangement = Arrangement.SpaceBetween) {
+        Row(Modifier.fillMaxWidth().padding(start = 72.dp), horizontalArrangement = Arrangement.SpaceBetween) {
             Text("1", color = Muted, fontSize = 8.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
             Text(((points.size + 1) / 2).coerceAtLeast(1).toString(), color = Muted, fontSize = 8.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)
             Text(points.size.coerceAtLeast(1).toString(), color = Muted, fontSize = 8.sp, fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace)

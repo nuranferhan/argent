@@ -14,6 +14,7 @@ import org.jetbrains.exposed.sql.insert
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.or
 import org.jetbrains.exposed.sql.transactions.transaction
+import org.jetbrains.exposed.sql.transactions.TransactionManager
 import org.jetbrains.exposed.sql.update
 import java.math.BigDecimal
 import java.time.Instant
@@ -109,6 +110,57 @@ class OrderRepository(private val db: Database) {
                 it[createdAt] = order.createdAt
                 it[updatedAt] = order.updatedAt
                 it[sequence] = order.sequence
+            }
+        }
+    }
+
+    /** Persist a recovered order snapshot without opening a transaction and doing an existence query per order. */
+    fun saveAll(orders: Collection<Order>) {
+        if (orders.isEmpty()) return
+        transaction(db) {
+            val statement = TransactionManager.current().connection.prepareStatement(
+                """INSERT INTO orders (id, client_order_id, user_id, symbol, side, type, price, quantity,
+                    filled_quantity, remaining_quantity, status, created_at, updated_at, sequence)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    ON CONFLICT (id) DO UPDATE SET
+                        filled_quantity = EXCLUDED.filled_quantity,
+                        remaining_quantity = EXCLUDED.remaining_quantity,
+                        status = EXCLUDED.status,
+                        updated_at = EXCLUDED.updated_at,
+                        sequence = EXCLUDED.sequence""".trimIndent(),
+                false
+            )
+            try {
+                var pending = 0
+                orders.forEach { order ->
+                    val clientOrderId = order.clientOrderId
+                    val price = order.price
+                    statement.set(1, order.id)
+                    if (clientOrderId == null) statement.setNull(2, Orders.clientOrderId.columnType)
+                    else statement.set(2, clientOrderId)
+                    statement.set(3, order.userId)
+                    statement.set(4, order.symbol)
+                    statement.set(5, order.side.name)
+                    statement.set(6, order.type.name)
+                    if (price == null) statement.setNull(7, Orders.price.columnType)
+                    else statement.set(7, price)
+                    statement.set(8, order.quantity)
+                    statement.set(9, order.filledQuantity)
+                    statement.set(10, order.remainingQuantity)
+                    statement.set(11, order.status.name)
+                    statement.set(12, order.createdAt)
+                    statement.set(13, Instant.now().toEpochMilli())
+                    statement.set(14, order.sequence)
+                    statement.addBatch()
+                    pending++
+                    if (pending == 1_000) {
+                        statement.executeBatch()
+                        pending = 0
+                    }
+                }
+                if (pending > 0) statement.executeBatch()
+            } finally {
+                statement.closeIfPossible()
             }
         }
     }

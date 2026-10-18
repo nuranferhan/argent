@@ -1,12 +1,15 @@
 package com.argent.terminal
 
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.ExperimentalFoundationApi
 import androidx.compose.foundation.background
+import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.PaddingValues
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.layout.fillMaxHeight
@@ -20,6 +23,7 @@ import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardOptions
@@ -55,8 +59,10 @@ import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
+import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Window
@@ -82,6 +88,7 @@ import com.argent.terminal.ui.ArgentBg
 import com.argent.terminal.ui.ArgentBlue
 import com.argent.terminal.ui.ArgentColors
 import com.argent.terminal.ui.ArgentGold
+import com.argent.terminal.ui.ArgentGoldDim
 import com.argent.terminal.ui.ArgentGreen
 import com.argent.terminal.ui.ArgentGreenDim
 import com.argent.terminal.ui.ArgentLine
@@ -101,6 +108,7 @@ import java.util.UUID
 
 fun main() = application {
     Window(
+        icon = painterResource("argent-icon.png"),
         onCloseRequest = ::exitApplication,
         title = "ARGENT — Multi-Asset Trading Terminal",
         state = rememberWindowState(width = 1560.dp, height = 940.dp)
@@ -252,11 +260,11 @@ private fun TradingDesk(api: ArgentApi, me: MeResponse, onLogout: () -> Unit, on
     }
     LaunchedEffect(me) {
         while (true) {
+            runCatching { portfolio = api.portfolio() }
+            runCatching { orders = api.orders() }
+            runCatching { fills = api.fills() }
+            runCatching { blotter = api.publicTrades(symbol) }
             runCatching {
-                portfolio = api.portfolio()
-                orders = api.orders()
-                fills = api.fills()
-                blotter = api.publicTrades(symbol)
                 val h = api.health()
                 health = if (h.status == "UP") buildString {
                     append("INFRA OK · ")
@@ -275,14 +283,14 @@ private fun TradingDesk(api: ArgentApi, me: MeResponse, onLogout: () -> Unit, on
                     if (!h.invariantOk) append(" · LEDGER")
                     if (!h.matchingEngine) append(" · ENGINE PAUSED")
                 }
-            }.onFailure { health = "GATEWAY DOWN" }
+            }.onFailure { health = "GATEWAY'E BAĞLANILAMIYOR · YENİDEN DENENİYOR" }
             delay(1_000)
         }
     }
 
     Column(Modifier.fillMaxSize().background(ArgentBg)) {
         TopBar(
-            me, tickers, health, onLogout, api, scope,
+            me, tickers, health, onLogout, api, symbol, scope,
             onFlash = { flash = it },
             onMeChanged = onMeChanged,
             onWorkspaceClosed = onLogout
@@ -343,17 +351,19 @@ private fun TradingDesk(api: ArgentApi, me: MeResponse, onLogout: () -> Unit, on
                 }
             )
         }
-        BottomDock(tab, { tab = it }, portfolio, orders, fills, blotter, tickers, api, me, scope) { flash = it }
+        BottomDock(tab, { tab = it }, portfolio, orders, fills, blotter, tickers, api, me, symbol, scope) { flash = it }
     }
 }
 
 @Composable
+@OptIn(ExperimentalFoundationApi::class)
 private fun TopBar(
     me: MeResponse,
     tickers: Map<String, TickerDto>,
     health: String,
     onLogout: () -> Unit,
     api: ArgentApi,
+    selectedSymbol: String,
     scope: kotlinx.coroutines.CoroutineScope,
     onFlash: (String) -> Unit,
     onMeChanged: (MeResponse) -> Unit,
@@ -385,18 +395,18 @@ private fun TopBar(
         }
         val ok = health.startsWith("INFRA OK")
         Box(
-            Modifier.widthIn(max = 260.dp)
+            Modifier.widthIn(min = 180.dp, max = 260.dp)
                 .background(if (ok) ArgentGreenDim else ArgentRedDim, RoundedCornerShape(4.dp))
                 .padding(horizontal = 8.dp, vertical = 4.dp)
         ) {
             Text(
-                health,
+                "$health     •     $health",
                 color = if (ok) ArgentGreen else ArgentRed,
                 fontSize = 11.sp,
                 fontFamily = FontFamily.Monospace,
                 maxLines = 1,
                 softWrap = false,
-                overflow = TextOverflow.Ellipsis
+                modifier = Modifier.fillMaxWidth().basicMarquee()
             )
         }
         Spacer(Modifier.width(12.dp))
@@ -419,6 +429,7 @@ private fun TopBar(
     if (workspaceOpen) WorkspaceDialog(
         api = api,
         me = me,
+        selectedSymbol = selectedSymbol,
         scope = scope,
         onClose = { workspaceOpen = false },
         onFlash = onFlash,
@@ -433,6 +444,7 @@ private fun TopBar(
 private fun WorkspaceDialog(
     api: ArgentApi,
     me: MeResponse,
+    selectedSymbol: String,
     scope: kotlinx.coroutines.CoroutineScope,
     onClose: () -> Unit,
     onFlash: (String) -> Unit,
@@ -911,12 +923,13 @@ private fun BottomDock(
     tickers: Map<String, TickerDto>,
     api: ArgentApi,
     me: MeResponse,
+    selectedSymbol: String,
     scope: kotlinx.coroutines.CoroutineScope,
     onFlash: (String) -> Unit
 ) {
-    Column(Modifier.fillMaxWidth().height(268.dp).background(ArgentPanelAlt)) {
+    Column(Modifier.fillMaxWidth().height(if (tab == 4) 420.dp else 268.dp).background(ArgentPanelAlt)) {
         TabRow(selectedTabIndex = tab, containerColor = ArgentPanel, contentColor = ArgentGold) {
-            listOf("Portföy", "Açık emirler", "İşlemlerim", "Piyasa işleri").forEachIndexed { i, t ->
+            listOf("Portföy", "Açık emirler", "İşlemlerim", "Piyasa işleri", "ARGENT AI").forEachIndexed { i, t ->
                 Tab(selected = tab == i, onClick = { onTab(i) }, text = { Text(t, fontSize = 12.sp) })
             }
         }
@@ -924,9 +937,165 @@ private fun BottomDock(
             0 -> PortfolioTab(portfolio, tickers)
             1 -> OrdersTab(orders, api, scope, onFlash)
             2 -> TradesTab(fills, orders)
-            else -> TradesTab(blotter)
+            3 -> TradesTab(blotter)
+            else -> AssistantTab(api, selectedSymbol, scope)
         }
     }
+}
+
+private data class AssistantUiMessage(val fromUser: Boolean, val text: String)
+
+private sealed interface AssistantBlock {
+    data class Heading(val text: String, val level: Int) : AssistantBlock
+    data class Paragraph(val text: String) : AssistantBlock
+    data class Bullet(val text: String) : AssistantBlock
+    data class Table(val headers: List<String>, val rows: List<List<String>>) : AssistantBlock
+}
+
+@Composable
+private fun AssistantTab(api: ArgentApi, symbol: String, scope: kotlinx.coroutines.CoroutineScope) {
+    val messages = remember { androidx.compose.runtime.mutableStateListOf<AssistantUiMessage>() }
+    val listState = rememberLazyListState()
+    var prompt by remember { mutableStateOf("") }
+    var enabled by remember { mutableStateOf<Boolean?>(null) }
+    var busy by remember { mutableStateOf(false) }
+    LaunchedEffect(Unit) { runCatching { enabled = api.assistantStatus().enabled } }
+    LaunchedEffect(messages.size, busy) { if (messages.isNotEmpty()) listState.animateScrollToItem(0) }
+    Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
+            Column {
+                Text("ARGENT AI", color = ArgentGold, fontSize = 13.sp, fontWeight = FontWeight.Bold)
+                Text("Portföy · emirler · $symbol", color = ArgentMuted, fontSize = 10.sp)
+            }
+            Surface(color = ArgentGreenDim, shape = RoundedCornerShape(50)) {
+                Text("SALT OKUNUR", color = ArgentGreen, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
+            }
+        }
+        Text(
+            when (enabled) {
+                true -> "ARGENT verileriyle yanıtlar · Emir veya bakiye değişikliği yapamaz"
+                false -> "Asistan kapalı · Gateway AI anahtarını kontrol et"
+                null -> "Asistan bağlantısı kontrol ediliyor…"
+            }, color = ArgentMuted, fontSize = 10.sp
+        )
+        if (messages.isEmpty()) {
+            Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.Center) {
+                Text("Nasıl yardımcı olabilirim?", color = ArgentSilver, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
+                Text("Hesap verilerin veya seçili piyasa hakkında sor.", color = ArgentMuted, fontSize = 11.sp, modifier = Modifier.padding(top = 3.dp, bottom = 6.dp))
+                listOf("Bugün portföyüm nasıl?", "Bekleyen emirlerimi açıkla", "$symbol piyasa özeti").forEach { suggestion ->
+                    Surface(color = ArgentPanel, shape = RoundedCornerShape(9.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp).clickable { prompt = suggestion }) {
+                        Text(suggestion, color = ArgentSilver, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp))
+                    }
+                }
+            }
+        } else {
+            LazyColumn(
+                state = listState, reverseLayout = true, modifier = Modifier.weight(1f).fillMaxWidth(),
+                verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(vertical = 3.dp)
+            ) {
+                if (busy) item { Text("ARGENT AI yanıt hazırlıyor…", color = ArgentMuted, fontSize = 10.sp, modifier = Modifier.padding(start = 8.dp, top = 3.dp)) }
+                items(messages.size) { index -> AssistantMessageBubble(messages[messages.lastIndex - index]) }
+            }
+        }
+        Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            OutlinedTextField(
+                value = prompt, onValueChange = { prompt = it }, enabled = !busy,
+                placeholder = { Text("ARGENT'e sor…") }, minLines = 1, maxLines = 3,
+                modifier = Modifier.weight(1f), colors = fieldColors()
+            )
+            Button(enabled = !busy && prompt.isNotBlank() && enabled != false, onClick = {
+                val question = prompt.trim(); prompt = ""; messages.add(AssistantUiMessage(true, question)); busy = true
+                scope.launch {
+                    try {
+                        runCatching { api.askAssistant(question, symbol) }
+                            .onSuccess { result -> messages.add(AssistantUiMessage(false, result.answer)) }
+                            .onFailure { messages.add(AssistantUiMessage(false, it.message ?: "Asistan yanıt veremedi.")) }
+                    } finally { busy = false }
+                }
+            }, modifier = Modifier.height(54.dp), colors = ButtonDefaults.buttonColors(containerColor = ArgentGold, contentColor = ArgentBg)) {
+                Text(if (busy) "…" else "Gönder")
+            }
+        }
+    }
+}
+
+@Composable
+private fun AssistantMessageBubble(message: AssistantUiMessage) {
+    Row(Modifier.fillMaxWidth(), horizontalArrangement = if (message.fromUser) Arrangement.End else Arrangement.Start) {
+        Surface(
+            modifier = Modifier.widthIn(max = 1050.dp).fillMaxWidth(if (message.fromUser) 0.72f else 0.96f),
+            color = if (message.fromUser) ArgentGoldDim else ArgentPanel,
+            shape = RoundedCornerShape(12.dp)
+        ) {
+            Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
+                Text(if (message.fromUser) "SEN" else "ARGENT AI", color = if (message.fromUser) ArgentGold else ArgentGreen, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                AssistantFormattedAnswer(message.text)
+            }
+        }
+    }
+}
+
+@Composable
+private fun AssistantFormattedAnswer(markdown: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(5.dp)) {
+        assistantBlocks(markdown).forEach { block ->
+            when (block) {
+                is AssistantBlock.Heading -> Text(block.text, color = ArgentGold, fontSize = if (block.level <= 2) 12.sp else 11.sp, fontWeight = FontWeight.Bold)
+                is AssistantBlock.Paragraph -> Text(block.text, color = ArgentSilver, fontSize = 11.sp, lineHeight = 16.sp)
+                is AssistantBlock.Bullet -> Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("•", color = ArgentGold, fontWeight = FontWeight.Bold)
+                    Text(block.text, color = ArgentSilver, fontSize = 11.sp, lineHeight = 16.sp)
+                }
+                is AssistantBlock.Table -> Column(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    block.rows.forEach { row ->
+                        Surface(color = ArgentPanelAlt, shape = RoundedCornerShape(7.dp)) {
+                            Column(Modifier.fillMaxWidth().padding(7.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                                block.headers.forEachIndexed { index, heading ->
+                                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.Top) {
+                                        Text(heading, color = ArgentMuted, fontSize = 9.sp, lineHeight = 12.sp, modifier = Modifier.weight(1.15f))
+                                        Text(row.getOrElse(index) { "—" }, color = ArgentSilver, fontSize = 10.sp, lineHeight = 13.sp, textAlign = TextAlign.End, modifier = Modifier.weight(1f))
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+            }
+        }
+    }
+}
+
+private fun assistantBlocks(markdown: String): List<AssistantBlock> {
+    val lines = markdown.lines().map { it.trim().replace(Regex("^(>\\s*)+"), "").trim() }
+    val result = mutableListOf<AssistantBlock>()
+    var index = 0
+    fun clean(value: String) = value.replace("**", "").replace("__", "").replace("`", "").trim()
+    fun isTableRow(value: String) = value.trim().startsWith("|") && value.trim().endsWith("|")
+    fun cells(value: String) = value.trim().trim('|').split('|').map(::clean)
+    while (index < lines.size) {
+        val line = lines[index].trim()
+        if (line.isBlank()) { index++; continue }
+        if (isTableRow(line)) {
+            val tableLines = mutableListOf<String>()
+            while (index < lines.size && isTableRow(lines[index])) tableLines += lines[index++]
+            val rows = tableLines.map(::cells).filterNot { row -> row.all { it.matches(Regex(":?-{2,}:?")) } }
+            if (rows.size > 1) result += AssistantBlock.Table(rows.first(), rows.drop(1))
+            else rows.firstOrNull()?.forEach { result += AssistantBlock.Paragraph(it) }
+            continue
+        }
+        val heading = Regex("^(#{1,6})\\s+(.+)$").matchEntire(line)
+        if (heading != null) { result += AssistantBlock.Heading(clean(heading.groupValues[2]), heading.groupValues[1].length); index++; continue }
+        val bullet = Regex("^(?:[-*+]\\s+|\\d+[.)]\\s+)(.+)$").matchEntire(line)
+        if (bullet != null) { result += AssistantBlock.Bullet(clean(bullet.groupValues[1])); index++; continue }
+        val paragraph = mutableListOf(clean(line))
+        index++
+        while (index < lines.size && lines[index].isNotBlank() && !isTableRow(lines[index].trim()) &&
+            !Regex("^(?:#{1,6}\\s+|[-*+]\\s+|\\d+[.)]\\s+)").containsMatchIn(lines[index].trim())) {
+            paragraph += clean(lines[index]); index++
+        }
+        result += AssistantBlock.Paragraph(paragraph.joinToString(" "))
+    }
+    return result
 }
 
 @Composable
@@ -940,8 +1109,8 @@ private fun PortfolioTab(
     }
     Column(Modifier.padding(12.dp).verticalScroll(rememberScrollState())) {
         Row(horizontalArrangement = Arrangement.spacedBy(22.dp)) {
-            Metric("Risk skoru", p.riskScore.toString())
-            Text("Spot işlem · kaldıraç/marjin kapalı", color = ArgentMuted, fontSize = 11.sp)
+            Metric("Pozisyon yoğunlaşması", "${p.riskScore}%")
+            Text("En büyük açık pozisyonun aynı para birimindeki toplam pozisyonlara oranı. ARGENT göstergesidir; genel risk notu değildir. Spot işlem · kaldıraç/marjin kapalı.", color = ArgentMuted, fontSize = 11.sp, modifier = Modifier.weight(1f))
         }
         p.valuations.forEach { value ->
             Spacer(Modifier.height(8.dp))
@@ -994,27 +1163,30 @@ private fun OrdersTab(
     onFlash: (String) -> Unit
 ) {
     val openOrders = orders.filter { it.status in setOf("PENDING", "ACCEPTED", "PARTIALLY_FILLED") && (it.remainingQuantity.toBigDecimalOrNull()?.signum() ?: 0) > 0 }
-    if (openOrders.isEmpty()) {
-        Text("Bekleyen veya açık emir yok. Tamamlanan ve iptal edilen emirler işlem geçmişinde yer alır.", color = ArgentMuted, modifier = Modifier.padding(12.dp), fontSize = 12.sp)
-        return
-    }
-    LazyColumn(Modifier.padding(8.dp)) {
-        items(openOrders) { o ->
-            Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
-                Text(
-                    "${o.symbol} ${o.side} ${o.type} ${compact(o.quantity)}@${o.price ?: "MKT"}  ${o.status}  filled ${compact(o.filledQuantity)}",
-                    color = ArgentSilver,
-                    fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace,
-                    modifier = Modifier.weight(1f)
-                )
-                if (o.status == "ACCEPTED" || o.status == "PARTIALLY_FILLED") {
-                    TextButton(onClick = {
-                        scope.launch {
-                            runCatching { api.cancel(o.id, o.symbol); onFlash("İptal ${o.id.take(8)}") }
-                                .onFailure { onFlash(it.message ?: "iptal hatası") }
+    Column(Modifier.fillMaxSize().padding(top = 8.dp)) {
+        Text("AÇIK EMİRLER · ${openOrders.size} bekleyen", color = ArgentGold, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 12.dp, vertical = 10.dp))
+        if (openOrders.isEmpty()) {
+            Text("Bekleyen emir yok. Tamamlanan ve iptal edilen emirler İşlemlerim geçmişindedir.", color = ArgentMuted, modifier = Modifier.padding(12.dp), fontSize = 12.sp)
+        } else {
+            LazyColumn(Modifier.weight(1f).fillMaxWidth().padding(8.dp)) {
+                items(openOrders, key = { it.id }) { o ->
+                    Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                        Text(
+                            "${o.symbol} ${o.side} ${o.type} ${compact(o.quantity)}@${o.price ?: "MKT"}  ${orderStatusLabel(o.status)}  filled ${compact(o.filledQuantity)}",
+                            color = ArgentSilver,
+                            fontSize = 12.sp,
+                            fontFamily = FontFamily.Monospace,
+                            modifier = Modifier.weight(1f)
+                        )
+                        if (o.status == "ACCEPTED" || o.status == "PARTIALLY_FILLED") {
+                            TextButton(onClick = {
+                                scope.launch {
+                                    runCatching { api.cancel(o.id, o.symbol); onFlash("İptal ${o.id.take(8)}") }
+                                        .onFailure { onFlash(it.message ?: "iptal hatası") }
+                                }
+                            }) { Text("İptal", color = ArgentRed, fontSize = 12.sp) }
                         }
-                    }) { Text("İptal", color = ArgentRed, fontSize = 12.sp) }
+                    }
                 }
             }
         }
@@ -1023,17 +1195,19 @@ private fun OrdersTab(
 
 @Composable
 private fun TradesTab(trades: List<TradeDto>, orders: List<OrderDto> = emptyList()) {
-    val openOrders = orders.filter { it.status in setOf("PENDING", "ACCEPTED", "PARTIALLY_FILLED") && (it.remainingQuantity.toBigDecimalOrNull()?.signum() ?: 0) > 0 }
-    if (trades.isEmpty() && openOrders.isEmpty()) {
-        Text("Devam eden emir veya işlem geçmişi yok.", color = ArgentMuted, modifier = Modifier.padding(12.dp), fontSize = 12.sp)
+    val orderHistory = orders.sortedByDescending { it.updatedAt.takeIf { updated -> updated > 0 } ?: it.createdAt }
+    if (trades.isEmpty() && orderHistory.isEmpty()) {
+        Text("Emir veya gerçekleşen işlem geçmişi yok.", color = ArgentMuted, modifier = Modifier.padding(12.dp), fontSize = 12.sp)
         return
     }
-    LazyColumn(Modifier.padding(8.dp)) {
-        if (openOrders.isNotEmpty()) {
-            item { Text("DEVAM EDEN EMİRLER", color = ArgentGold, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 5.dp)) }
-            items(openOrders) { o ->
-                Text("${o.symbol} ${o.side} ${o.type} · ${o.status} · kalan ${compact(o.remainingQuantity)} · ${o.price ?: "MKT"}", color = ArgentSilver, fontSize = 12.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(vertical = 2.dp))
-            }
+    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 8.dp).padding(top = 8.dp)) {
+        item { Text("EMİR GEÇMİŞİ · ${orderHistory.size} son emir", color = ArgentGold, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(vertical = 8.dp)) }
+        if (orderHistory.isEmpty()) item { Text("Emir geçmişi boş.", color = ArgentMuted, fontSize = 12.sp) }
+        items(orderHistory, key = { "order-${it.id}" }) { o ->
+            Text(
+                "${o.symbol} ${o.side} ${o.type} · ${orderStatusLabel(o.status)} · dolan ${compact(o.filledQuantity)}/${compact(o.quantity)} · kalan ${compact(o.remainingQuantity)} · ${o.price ?: "MKT"}",
+                color = ArgentSilver, fontSize = 12.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(vertical = 2.dp)
+            )
         }
         if (trades.isNotEmpty()) item { Text("GERÇEKLEŞEN İŞLEMLER", color = ArgentGold, fontSize = 11.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(top = 10.dp, bottom = 5.dp)) }
         items(trades) { t ->
@@ -1046,6 +1220,16 @@ private fun TradesTab(trades: List<TradeDto>, orders: List<OrderDto> = emptyList
             )
         }
     }
+}
+
+private fun orderStatusLabel(status: String): String = when (status.uppercase()) {
+    "ACCEPTED", "NEW", "PENDING" -> "AÇIK"
+    "PARTIALLY_FILLED" -> "KISMEN DOLDU"
+    "FILLED" -> "DOLDU"
+    "CANCELLED", "CANCELED" -> "İPTAL"
+    "REJECTED" -> "REDDEDİLDİ"
+    "EXPIRED" -> "SÜRESİ DOLDU"
+    else -> status
 }
 
 @Composable

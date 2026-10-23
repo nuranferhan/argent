@@ -8,7 +8,7 @@ BIST hisseleri ve kripto paritelerini tek çatı altında işleyen; emir eşleş
 
 Varsayılan yerel çalışma kipinde ARGENT ücretsiz Binance public WebSocket'inden kripto kotasyonlarını alır; API anahtarı gerekmez, internet bağlantısı gerekir. BIST fiyatları simüledir. İnternetsiz geliştirme için `MARKET_DATA_MODE=SIMULATED` seçilebilir. Emirler ARGENT'in dahili eşleştirme motorunda işlenir; Binance public veri kipinde dışarı emir gönderilmez. Admin tarafından ayrıca yapılandırıldığında **Binance Spot Testnet** emir gönderme, sorgulama ve iptal akışını test eder. Testnet fill'leri ARGENT'in dahili eşleştirme motoruna girmez; gerçekleşen miktarlar, komisyonlar ve ayrılan/kalan rezerv ARGENT'in sanal ledger'ına işlenir. Bu sanal başlangıç bakiyesi Binance Testnet bakiyesinin içe aktarımı değildir; gerçek para değildir. Yerel CSV replay yalnızca kullanıcının kullanım hakkı olan verilerle çalışır. Bu proje gerçek borsa erişimi, lisanslı canlı BIST verisi veya müşteri fonu saklama hizmeti sunmaz.
 
-## Çalıştırmadan önce (Windows 11)
+## Çalıştırmadan önce
 
 | Ne | Gerekli mi | Not |
 |---|---|---|
@@ -48,7 +48,7 @@ Depoyu klonlayın ve PowerShell'i depo kök dizininde açın:
 .\scripts\start-stack.ps1
 ```
 
-İsteğe bağlı olarak yalnızca Windows masaüstü terminali için MSI kurulum paketi üretin:
+İsteğe bağlı olarak masaüstü terminali için MSI kurulum paketi üretin:
 
 ```powershell
 .\scripts\package-terminal.ps1
@@ -229,7 +229,7 @@ güven aralığı geniştir; bu değerler yalnızca o makine ve o çalıştırma
 
 Gateway `/metrics` (Micrometer/Prometheus). Compose Grafana panosu `ops/grafana/dashboards/argent.json` otomatik yüklenir.
 
-Windows yerel stack ve teslim paketini kontrol etmek için servisler açıkken `.\scripts\verify-local-release.ps1` çalıştırın. Script yöneticiyle oturum açıp ledger mutabakatını doğrular ve geçici refresh token'ı sonunda iptal eder; işlem veya bakiye değiştirmez. PostgreSQL üzerinde gerçek servis testi için `.\scripts\test-postgres-integration.ps1` kullanın. Başlatma, durdurma, yedekleme ve arıza adımları [operasyon runbook'unda](docs/operations-runbook.md) yer alır.
+Yerel stack ve teslim paketini kontrol etmek için servisler açıkken `.\scripts\verify-local-release.ps1` çalıştırın. Script yöneticiyle oturum açıp ledger mutabakatını doğrular ve geçici refresh token'ı sonunda iptal eder; işlem veya bakiye değiştirmez. PostgreSQL üzerinde gerçek servis testi için `.\scripts\test-postgres-integration.ps1` kullanın. Başlatma, durdurma, yedekleme ve arıza adımları [operasyon runbook'unda](docs/operations-runbook.md) yer alır.
 
 ## Veritabanı yedekleme ve geri yükleme
 

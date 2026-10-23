@@ -40,9 +40,12 @@ import com.argent.gateway.api.TokenResponse
 import com.argent.gateway.api.TradeInfo
 import com.argent.gateway.api.AssistantQuestionRequest
 import com.argent.gateway.api.AssistantStatusResponse
+import com.argent.gateway.api.AssistantAlertsResponse
 import com.argent.gateway.api.WithdrawRequest
 import com.argent.gateway.auth.AuthService
 import com.argent.gateway.assistant.ReadOnlyAssistantService
+import com.argent.gateway.assistant.AssistantPortfolioHistoryStore
+import com.argent.gateway.assistant.AssistantDraftOrder
 import com.argent.gateway.auth.UserRole
 import com.argent.gateway.auth.TenantRole
 import com.argent.gateway.config.AppConfig
@@ -148,6 +151,7 @@ fun main() {
     val binanceTestnet = BinanceSpotTestnet(config.binanceSpotTestnetApiKey, config.binanceSpotTestnetSecret)
     val risk = RiskService(ledger)
     val assistant = ReadOnlyAssistantService.fromEnvironment()
+    val assistantPortfolioHistory = AssistantPortfolioHistoryStore(database).also { it.initSchema() }
     val prometheus = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
     val trading = TradingService(engine, ledger, risk, orders, market, prometheus)
     val limiter = RedisRateLimiter(config.redisUrl)
@@ -509,10 +513,38 @@ fun main() {
                 }
                 get("/api/v1/portfolio") {
                     val p = call.principal<ArgentPrincipal>()!!
-                    call.respond(risk.portfolio(p.accountId, market.allLastPrices()))
+                    val snapshot = risk.portfolio(p.accountId, market.allLastPrices())
+                    runCatching { assistantPortfolioHistory.recordAndGetDailyBaseline(p.accountId, snapshot, System.currentTimeMillis()) }
+                        .onFailure { log.warn("Could not record assistant portfolio sample", it) }
+                    call.respond(snapshot)
                 }
                 get("/api/v1/assistant/status") {
                     call.respond(AssistantStatusResponse(assistant.enabled, assistant.statusProvider(), if (assistant.enabled) assistant.model else null))
+                }
+                get("/api/v1/assistant/alerts") {
+                    val p = call.principal<ArgentPrincipal>()!!
+                    val requestedSymbol = call.request.queryParameters["symbol"]?.trim()?.uppercase()?.takeIf(String::isNotBlank)
+                    if (requestedSymbol != null && Instruments.all.none { it.symbol == requestedSymbol }) {
+                        return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("Bilinmeyen sembol: $requestedSymbol"))
+                    }
+                    val now = System.currentTimeMillis()
+                    val prices = market.allLastPrices()
+                    val snapshot = risk.portfolio(p.accountId, prices)
+                    val baseline = assistantPortfolioHistory.recordAndGetDailyBaseline(p.accountId, snapshot, now)
+                    val ticker = requestedSymbol?.let(market::lastTicker)
+                    val marketMode = "CRYPTO ${market.cryptoFeedStatus()} · BIST SIMULATED"
+                    val sources = buildList {
+                        add("ARGENT portföy ve sanal defter")
+                        add("CRYPTO ${market.cryptoFeedStatus()} · BIST SIMULATED")
+                        ticker?.let { add("${it.source} piyasa verisi: ${it.symbol}") }
+                    }
+                    call.respond(AssistantAlertsResponse(
+                        alerts = assistant.currentAlerts(snapshot, ticker, marketMode, now, baseline),
+                        generatedAt = now,
+                        dataAsOf = ticker?.timestamp ?: now,
+                        sources = sources,
+                        marketMode = marketMode
+                    ))
                 }
                 post("/api/v1/assistant/chat") {
                     val p = call.principal<ArgentPrincipal>()!!
@@ -529,18 +561,32 @@ fun main() {
                         return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("Bilinmeyen sembol: $symbol"))
                     }
                     val ticker = symbol?.let(market::lastTicker)
+                    val draftOrder = runCatching {
+                        val side = request.draftSide?.trim()?.uppercase() ?: return@runCatching null
+                        val type = request.draftType?.trim()?.uppercase() ?: return@runCatching null
+                        val quantity = request.draftQuantity?.trim()?.replace(',', '.') ?: return@runCatching null
+                        require(side in setOf("BUY", "SELL") && type in setOf("LIMIT", "MARKET"))
+                        require(BigDecimal(quantity).signum() > 0)
+                        val price = request.draftPrice?.trim()?.replace(',', '.')?.takeIf(String::isNotBlank)
+                        if (type == "LIMIT") require(price != null && BigDecimal(price).signum() > 0)
+                        AssistantDraftOrder(side, type, quantity, price)
+                    }.getOrNull()
                     val marketMode = "CRYPTO ${market.cryptoFeedStatus()} · BIST SIMULATED"
                     val answer = runCatching {
+                        val portfolioSnapshot = risk.portfolio(p.accountId, market.allLastPrices())
+                        val baseline = assistantPortfolioHistory.recordAndGetDailyBaseline(p.accountId, portfolioSnapshot, System.currentTimeMillis())
                         assistant.answer(
                             question = question,
                             symbol = symbol,
-                            portfolio = risk.portfolio(p.accountId, market.allLastPrices()),
-                            orders = orders.findByUser(p.accountId, 100),
-                            fills = orders.findTrades(userId = p.accountId, limit = 100),
+                            portfolio = portfolioSnapshot,
+                            orders = orders.findByUser(p.accountId, 500),
+                            fills = orders.findTrades(userId = p.accountId, limit = 500),
                             ticker = ticker,
                             recentPrices = symbol?.let(market::history).orEmpty(),
                             depth = symbol?.let { engine.depth(it, 5) },
-                            marketMode = marketMode
+                            marketMode = marketMode,
+                            dailyBaseline = baseline,
+                            draftOrder = draftOrder
                         )
                     }.getOrElse {
                         log.warn("Read-only ARGENT AI request failed: {}", it.message)

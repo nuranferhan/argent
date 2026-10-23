@@ -165,7 +165,14 @@ data class TradeInfo(
 )
 
 @Serializable
-data class AssistantQuestionRequest(val question: String, val symbol: String? = null)
+data class AssistantQuestionRequest(
+    val question: String,
+    val symbol: String? = null,
+    val draftSide: String? = null,
+    val draftType: String? = null,
+    val draftQuantity: String? = null,
+    val draftPrice: String? = null
+)
 
 @Serializable
 data class AssistantStatusResponse(val enabled: Boolean, val provider: String, val model: String? = null)
@@ -173,6 +180,15 @@ data class AssistantStatusResponse(val enabled: Boolean, val provider: String, v
 @Serializable
 data class AssistantAnswerResponse(
     val answer: String,
+    val generatedAt: Long,
+    val dataAsOf: Long,
+    val sources: List<String>,
+    val marketMode: String
+)
+
+@Serializable
+data class AssistantAlertsResponse(
+    val alerts: List<String>,
     val generatedAt: Long,
     val dataAsOf: Long,
     val sources: List<String>,

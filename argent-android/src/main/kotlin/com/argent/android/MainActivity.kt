@@ -182,6 +182,10 @@ private fun MainScreen(api: ArgentApi, initialMe: MeResponse, onMeChanged: (MeRe
     var gatewayReachable by remember { mutableStateOf(true) }
     var message by remember { mutableStateOf<String?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var draftSide by remember { mutableStateOf("BUY") }
+    var draftType by remember { mutableStateOf("LIMIT") }
+    var draftQuantity by remember { mutableStateOf("1") }
+    var draftPrice by remember { mutableStateOf("") }
     val prices = remember { mutableStateListOf<Float>() }
 
     LaunchedEffect(Unit) {
@@ -235,17 +239,18 @@ private fun MainScreen(api: ArgentApi, initialMe: MeResponse, onMeChanged: (MeRe
             message?.let { Text(it, color = if (it.contains("hata", true) || it.contains("REJECTED", true)) Red else Gold, modifier = Modifier.padding(horizontal = 12.dp)) }
             when (page) {
                 Page.TRADE -> TradePage(api, instruments, symbol, { symbol = it }, ticker, book, prices, trades, busy,
-                    onMessage = { message = it }, onBusy = { busy = it }, onRefresh = { portfolio = api.portfolio(); orders = api.orders() })
+                    onMessage = { message = it }, onBusy = { busy = it }, onRefresh = { portfolio = api.portfolio(); orders = api.orders() },
+                    onDraftChange = { side, type, quantity, price -> draftSide = side; draftType = type; draftQuantity = quantity; draftPrice = price })
                 Page.PORTFOLIO -> PortfolioPage(portfolio)
                 Page.ORDERS -> OrdersPage(orders, fills, api, onMessage = { message = it })
-                Page.ASSISTANT -> AssistantScreen(api, symbol)
+                Page.ASSISTANT -> AssistantScreen(api, symbol, draftSide, draftType, draftQuantity, draftPrice)
                 Page.WORKSPACE -> WorkspacePage(api, me, { me = it; onMeChanged(it) }, onMessage = { message = it }, onLogout = onLogout)
             }
         }
     }
 }
 
-private data class AssistantUiMessage(val fromUser: Boolean, val text: String)
+private data class AssistantUiMessage(val fromUser: Boolean, val text: String, val metadata: String? = null)
 
 private sealed interface AssistantBlock {
     data class Heading(val text: String, val level: Int) : AssistantBlock
@@ -255,14 +260,26 @@ private sealed interface AssistantBlock {
 }
 
 @Composable
-private fun AssistantScreen(api: ArgentApi, symbol: String) {
+private fun AssistantScreen(api: ArgentApi, symbol: String, draftSide: String, draftType: String, draftQuantity: String, draftPrice: String) {
     val scope = rememberCoroutineScope()
     val messages = remember { mutableStateListOf<AssistantUiMessage>() }
     val listState = rememberLazyListState()
     var prompt by remember { mutableStateOf("") }
     var enabled by remember { mutableStateOf<Boolean?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var alerts by remember { mutableStateOf<List<String>>(emptyList()) }
+    var alertMetadata by remember { mutableStateOf("") }
     LaunchedEffect(Unit) { runCatching { enabled = api.assistantStatus().enabled } }
+    LaunchedEffect(symbol) {
+        while (true) {
+            runCatching { api.assistantAlerts(symbol) }.onSuccess { result ->
+                alerts = result.alerts
+                val time = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(result.dataAsOf))
+                alertMetadata = "Kaynak: ${result.sources.joinToString()} · Veri: $time"
+            }
+            kotlinx.coroutines.delay(60_000)
+        }
+    }
     LaunchedEffect(messages.size, busy) {
         if (messages.isNotEmpty()) listState.animateScrollToItem(0)
     }
@@ -283,11 +300,18 @@ private fun AssistantScreen(api: ArgentApi, symbol: String) {
                 null -> "Asistan bağlantısı kontrol ediliyor…"
             }, color = Muted, fontSize = 10.sp
         )
+        if (alerts.isNotEmpty()) Surface(color = Color(0xFF1D2630), shape = RoundedCornerShape(9.dp)) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 7.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("UYARILAR", color = Gold, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                alerts.forEach { Text("• $it", color = Color(0xFFE0E4E8), fontSize = 9.sp, lineHeight = 12.sp) }
+                Text(alertMetadata, color = Muted, fontSize = 9.sp, lineHeight = 12.sp)
+            }
+        }
         if (messages.isEmpty()) {
             Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.Center) {
                 Text("Ne öğrenmek istersin?", color = Color(0xFFE0E4E8), fontSize = 16.sp, fontWeight = FontWeight.SemiBold)
                 Text("Hesap verilerin ve seçili piyasa bilgisi üzerinden sorabilirsin.", color = Muted, fontSize = 11.sp, modifier = Modifier.padding(top = 4.dp, bottom = 8.dp))
-                listOf("Bugün portföyüm nasıl?", "Bekleyen emirlerimi açıkla", "$symbol piyasa özeti").forEach { suggestion ->
+                listOf("Son 7 gündeki iptal edilen emirlerim", "Risk ve veri akışı uyarılarımı kontrol et", "Demo senaryolarını göster").forEach { suggestion ->
                     Surface(
                         color = Panel, shape = RoundedCornerShape(10.dp),
                         modifier = Modifier.fillMaxWidth().padding(vertical = 3.dp).clickable { prompt = suggestion }
@@ -315,8 +339,12 @@ private fun AssistantScreen(api: ArgentApi, symbol: String) {
                 val question = prompt.trim(); prompt = ""; messages.add(AssistantUiMessage(true, question)); busy = true
                 scope.launch {
                     try {
-                        runCatching { api.askAssistant(question, symbol) }
-                            .onSuccess { result -> messages.add(AssistantUiMessage(false, cleanAssistantAnswer(result.answer))) }
+                        runCatching { api.askAssistant(question, symbol, draftSide, draftType, draftQuantity, draftPrice) }
+                            .onSuccess { result ->
+                                val time = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(result.dataAsOf))
+                                val meta = "Kaynak: ${result.sources.joinToString()} · ${result.marketMode} · Veri: $time"
+                                messages.add(AssistantUiMessage(false, cleanAssistantAnswer(result.answer), meta))
+                            }
                             .onFailure { messages.add(AssistantUiMessage(false, it.message ?: "Asistan yanıt veremedi.")) }
                     } finally { busy = false }
                 }
@@ -353,6 +381,7 @@ private fun AssistantMessageBubble(message: AssistantUiMessage) {
             Column(Modifier.padding(12.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
                 Text(if (message.fromUser) "SEN" else "ARGENT AI", color = if (message.fromUser) Gold else Green, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 AssistantFormattedAnswer(message.text)
+                message.metadata?.let { Text(it, color = Muted, fontSize = 9.sp, lineHeight = 12.sp) }
             }
         }
     }
@@ -424,12 +453,14 @@ private fun assistantBlocks(markdown: String): List<AssistantBlock> {
 @Composable
 private fun TradePage(api: ArgentApi, instruments: List<InstrumentDto>, symbol: String, onSymbol: (String) -> Unit,
                       ticker: TickerDto?, book: OrderBookDto, prices: List<Float>, trades: List<TradeDto>, busy: Boolean,
-                      onMessage: (String) -> Unit, onBusy: (Boolean) -> Unit, onRefresh: suspend () -> Unit) {
+                      onMessage: (String) -> Unit, onBusy: (Boolean) -> Unit, onRefresh: suspend () -> Unit,
+                      onDraftChange: (String, String, String, String) -> Unit) {
     val scope = rememberCoroutineScope()
     var side by remember { mutableStateOf("BUY") }
     var type by remember { mutableStateOf("LIMIT") }
     var quantity by remember { mutableStateOf("1") }
     var price by remember { mutableStateOf("") }
+    LaunchedEffect(symbol, side, type, quantity, price) { onDraftChange(side, type, quantity, price) }
     val instrument = instruments.firstOrNull { it.symbol == symbol }
     val sourceBadge = if (instrument?.assetClass == "CRYPTO" && ticker?.source?.equals("binance", ignoreCase = true) == true) "BINANCE" else null
     val quantityValue = quantity.trim().replace(',', '.').toBigDecimalOrNull()
@@ -796,7 +827,8 @@ private fun TradePagePreview() {
             busy = false,
             onMessage = {},
             onBusy = {},
-            onRefresh = {}
+            onRefresh = {},
+            onDraftChange = { _, _, _, _ -> }
         )
     }
 }

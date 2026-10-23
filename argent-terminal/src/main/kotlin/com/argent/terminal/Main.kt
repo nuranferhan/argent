@@ -351,7 +351,7 @@ private fun TradingDesk(api: ArgentApi, me: MeResponse, onLogout: () -> Unit, on
                 }
             )
         }
-        BottomDock(tab, { tab = it }, portfolio, orders, fills, blotter, tickers, api, me, symbol, scope) { flash = it }
+        BottomDock(tab, { tab = it }, portfolio, orders, fills, blotter, tickers, api, me, symbol, side, type, qty, price, scope) { flash = it }
     }
 }
 
@@ -924,6 +924,10 @@ private fun BottomDock(
     api: ArgentApi,
     me: MeResponse,
     selectedSymbol: String,
+    draftSide: String,
+    draftType: String,
+    draftQuantity: String,
+    draftPrice: String,
     scope: kotlinx.coroutines.CoroutineScope,
     onFlash: (String) -> Unit
 ) {
@@ -938,12 +942,12 @@ private fun BottomDock(
             1 -> OrdersTab(orders, api, scope, onFlash)
             2 -> TradesTab(fills, orders)
             3 -> TradesTab(blotter)
-            else -> AssistantTab(api, selectedSymbol, scope)
+            else -> AssistantTab(api, selectedSymbol, draftSide, draftType, draftQuantity, draftPrice, scope)
         }
     }
 }
 
-private data class AssistantUiMessage(val fromUser: Boolean, val text: String)
+private data class AssistantUiMessage(val fromUser: Boolean, val text: String, val metadata: String? = null)
 
 private sealed interface AssistantBlock {
     data class Heading(val text: String, val level: Int) : AssistantBlock
@@ -953,13 +957,33 @@ private sealed interface AssistantBlock {
 }
 
 @Composable
-private fun AssistantTab(api: ArgentApi, symbol: String, scope: kotlinx.coroutines.CoroutineScope) {
+private fun AssistantTab(
+    api: ArgentApi,
+    symbol: String,
+    draftSide: String,
+    draftType: String,
+    draftQuantity: String,
+    draftPrice: String,
+    scope: kotlinx.coroutines.CoroutineScope
+) {
     val messages = remember { androidx.compose.runtime.mutableStateListOf<AssistantUiMessage>() }
     val listState = rememberLazyListState()
     var prompt by remember { mutableStateOf("") }
     var enabled by remember { mutableStateOf<Boolean?>(null) }
     var busy by remember { mutableStateOf(false) }
+    var alerts by remember { mutableStateOf<List<String>>(emptyList()) }
+    var alertMetadata by remember { mutableStateOf("") }
     LaunchedEffect(Unit) { runCatching { enabled = api.assistantStatus().enabled } }
+    LaunchedEffect(symbol) {
+        while (true) {
+            runCatching { api.assistantAlerts(symbol) }.onSuccess { result ->
+                alerts = result.alerts
+                val time = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(result.dataAsOf))
+                alertMetadata = "Kaynak: ${result.sources.joinToString()} · Veri: $time"
+            }
+            kotlinx.coroutines.delay(60_000)
+        }
+    }
     LaunchedEffect(messages.size, busy) { if (messages.isNotEmpty()) listState.animateScrollToItem(0) }
     Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
@@ -978,11 +1002,18 @@ private fun AssistantTab(api: ArgentApi, symbol: String, scope: kotlinx.coroutin
                 null -> "Asistan bağlantısı kontrol ediliyor…"
             }, color = ArgentMuted, fontSize = 10.sp
         )
+        if (alerts.isNotEmpty()) Surface(color = ArgentPanelAlt, shape = RoundedCornerShape(9.dp)) {
+            Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 7.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                Text("UYARILAR", color = ArgentGold, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+                alerts.forEach { Text("• $it", color = ArgentSilver, fontSize = 9.sp, lineHeight = 12.sp) }
+                Text(alertMetadata, color = ArgentMuted, fontSize = 9.sp, lineHeight = 12.sp)
+            }
+        }
         if (messages.isEmpty()) {
             Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.Center) {
                 Text("Nasıl yardımcı olabilirim?", color = ArgentSilver, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 Text("Hesap verilerin veya seçili piyasa hakkında sor.", color = ArgentMuted, fontSize = 11.sp, modifier = Modifier.padding(top = 3.dp, bottom = 6.dp))
-                listOf("Bugün portföyüm nasıl?", "Bekleyen emirlerimi açıkla", "$symbol piyasa özeti").forEach { suggestion ->
+                listOf("Son 7 gündeki iptal edilen emirlerim", "Risk ve veri akışı uyarılarımı kontrol et", "Demo senaryolarını göster").forEach { suggestion ->
                     Surface(color = ArgentPanel, shape = RoundedCornerShape(9.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp).clickable { prompt = suggestion }) {
                         Text(suggestion, color = ArgentSilver, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp))
                     }
@@ -1007,8 +1038,12 @@ private fun AssistantTab(api: ArgentApi, symbol: String, scope: kotlinx.coroutin
                 val question = prompt.trim(); prompt = ""; messages.add(AssistantUiMessage(true, question)); busy = true
                 scope.launch {
                     try {
-                        runCatching { api.askAssistant(question, symbol) }
-                            .onSuccess { result -> messages.add(AssistantUiMessage(false, result.answer)) }
+                        runCatching { api.askAssistant(question, symbol, draftSide, draftType, draftQuantity, draftPrice) }
+                            .onSuccess { result ->
+                                val time = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(result.dataAsOf))
+                                val meta = "Kaynak: ${result.sources.joinToString()} · ${result.marketMode} · Veri: $time"
+                                messages.add(AssistantUiMessage(false, result.answer, meta))
+                            }
                             .onFailure { messages.add(AssistantUiMessage(false, it.message ?: "Asistan yanıt veremedi.")) }
                     } finally { busy = false }
                 }
@@ -1030,6 +1065,7 @@ private fun AssistantMessageBubble(message: AssistantUiMessage) {
             Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(if (message.fromUser) "SEN" else "ARGENT AI", color = if (message.fromUser) ArgentGold else ArgentGreen, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 AssistantFormattedAnswer(message.text)
+                message.metadata?.let { Text(it, color = ArgentMuted, fontSize = 9.sp, lineHeight = 12.sp) }
             }
         }
     }

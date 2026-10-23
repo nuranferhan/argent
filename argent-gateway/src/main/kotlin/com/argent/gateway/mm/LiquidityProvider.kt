@@ -93,7 +93,13 @@ class LiquidityProvider(
     }
 
     private suspend fun quote(symbol: String, assetClass: AssetClass, priceScale: Int) {
-        val ticker = market.lastTicker(symbol) ?: return
+        val ticker = market.lastTicker(symbol)
+        if (ticker == null) {
+            // Do not leave previously quoted synthetic prices resting when a real feed is unavailable.
+            orders.findActiveByUser(userId).filter { it.symbol == symbol }
+                .forEach { trading.cancel(userId, it.id, symbol) }
+            return
+        }
         val last = BigDecimal(ticker.price)
         val live = orders.findActiveByUser(userId).filter { it.symbol == symbol }
         if (System.currentTimeMillis() - ticker.timestamp > maxQuoteAgeMs) {

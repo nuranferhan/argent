@@ -199,6 +199,15 @@ class AuthService(
         }
     }
 
+    /** Re-checks the account password immediately before a user-confirmed sensitive action. */
+    fun verifyPassword(userId: String, password: String): Boolean {
+        if (!validPasswordInput(password)) return false
+        return transaction(db) {
+            val user = Users.selectAll().where { Users.id eq userId }.firstOrNull() ?: return@transaction false
+            user[Users.active] && BCrypt.checkpw(password, user[Users.passwordHash])
+        }
+    }
+
     fun registerFromInvitation(email: String, password: String, displayName: String, rawToken: String): TokenPair {
         val normalized = email.trim().lowercase()
         require(normalized.contains("@") && normalized.length in 5..255) { "Invalid email" }

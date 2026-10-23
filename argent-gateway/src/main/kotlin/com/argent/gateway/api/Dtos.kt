@@ -129,7 +129,15 @@ data class LedgerReconciliationMismatchDto(
 @Serializable data class BistHistoricalReplayRequest(val csv: String, val speed: Int = 1000)
 
 @Serializable
-data class TickerResponse(val symbol: String, val price: String, val bid: String? = null, val ask: String? = null)
+data class TickerResponse(
+    val symbol: String,
+    val price: String,
+    val bid: String? = null,
+    val ask: String? = null,
+    val volume24h: String? = null,
+    val source: String? = null,
+    val timestamp: Long = 0
+)
 
 @Serializable
 data class ErrorResponse(val error: String)
@@ -172,6 +180,15 @@ data class AssistantQuestionRequest(
     val draftType: String? = null,
     val draftQuantity: String? = null,
     val draftPrice: String? = null
+)
+
+@Serializable data class AssistantOrderDraftRequest(val prompt: String)
+@Serializable data class ConfirmAssistantOrderRequest(val password: String, val acknowledgeSummary: Boolean)
+@Serializable data class AssistantOrderDraftResponse(
+    val draftId: String, val symbol: String, val side: String, val type: String,
+    val quantity: String, val price: String, val quoteNotional: String,
+    val quoteAsset: String, val source: String, val dataAsOf: Long, val expiresAt: Long,
+    val note: String = "Bu yalnızca taslaktır; gönderim için ayrıca onay gerekir."
 )
 
 @Serializable

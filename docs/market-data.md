@@ -1,10 +1,19 @@
 # Market data and Binance Spot Testnet
 
-ARGENT has three separate functions here: simulated prices, caller-supplied BIST history replay, and orders to Binance's Spot Testnet. None provides live BIST quotes or real-money execution.
+ARGENT has separate market-data and execution paths: public Binance crypto quotes, optionally provider-sourced BIST quotes, explicitly simulated demo prices, caller-supplied BIST history replay, internal matching, and orders to Binance Spot Testnet. Market data never implies real-money execution.
 
 ## Public crypto prices
 
-The local default is `MARKET_DATA_MODE=BINANCE_PUBLIC`. It reads public crypto tickers from Binance's WebSocket without API credentials; the gateway needs internet access. BIST equities continue to use ARGENT's simulated feed. This public stream is market data only: regular ARGENT orders still use the internal matching engine. Set `MARKET_DATA_MODE=SIMULATED` to run without internet. Binance Spot Testnet execution is configured separately with its own Testnet-only credentials.
+The default is `MARKET_DATA_MODE=BINANCE_PUBLIC`: real crypto tickers stream from Binance's public WebSocket without an API key. BIST quotes are unavailable by default because no free BIST API with verified display/redistribution rights has been identified. Borsa İstanbul distributes market data through authorized data vendors; a public webpage or an unofficial scraper is not a substitute for permission to display a feed in ARGENT. The optional istfin adapter requires an API key and paid access; istfin's materials describe delayed data and currently list a subscription, so verify current price, delay, entitlement and display rights before enabling it. Keep the provider key in the ignored local `.env` file or deployment secret store; never commit it. Regular ARGENT orders still use the internal matching engine, not BIST. Set `MARKET_DATA_MODE=SIMULATED` only for clearly labeled demo prices. Nasdaq reference quotes and headlines can be enabled with a Finnhub API key, subject to provider limits and display license. Binance Spot Testnet execution is configured separately with its own Testnet-only credentials.
+
+For local development, add the key to the ignored root `.env` file and rebuild the gateway. Never paste it into chat or commit it:
+
+```dotenv
+MARKET_DATA_MODE=ISTFIN_BIST
+ISTFIN_API_KEY=your_provider_key
+```
+
+The gateway polls all configured BIST symbols in one request, respects `429` retry hints and backs off on provider failures. Quotes include the provider's `asOf` time and no synthetic bid/ask is fabricated when the provider does not return one. An API key alone does not grant permission to redistribute or display market data; obtain the required right for the way you plan to show ARGENT.
 
 ## Binance Spot Testnet
 
@@ -40,7 +49,7 @@ All endpoints require the ARGENT admin Bearer token. An exchange rejection (for 
 
 ## BIST history replay
 
-The simulator remains the default BIST stream. The replay API accepts a CSV supplied by the local admin; ARGENT does not download, redistribute, or grant rights to BIST data. Check the data provider's terms before importing or sharing files. Do not include licensed datasets or private data in GitHub.
+The simulator is opt-in only. The replay API accepts a CSV supplied by the local admin; ARGENT does not download, redistribute, or grant rights to BIST data. Check the data provider's terms before importing or sharing files. Do not include licensed datasets or private data in GitHub.
 
 Accepted CSV columns, in this order:
 

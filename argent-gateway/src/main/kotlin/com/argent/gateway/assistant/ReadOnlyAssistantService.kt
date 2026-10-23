@@ -8,6 +8,8 @@ import com.argent.common.domain.Trade
 import com.argent.engine.OrderBookDepth
 import com.argent.gateway.api.AssistantAnswerResponse
 import com.argent.market.TickerUpdate
+import com.argent.market.TechnicalAnalysis
+import com.argent.market.TechnicalAnalysisSnapshot
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import kotlinx.serialization.Serializable
@@ -101,6 +103,10 @@ class ReadOnlyAssistantService(
                 put("symbol", ticker.symbol); put("price", ticker.price); put("bid", ticker.bid ?: "unknown")
                 put("ask", ticker.ask ?: "unknown"); put("source", ticker.source); put("timestamp", ticker.timestamp)
                 put("recentPrices", buildJsonArray { recentPrices.takeLast(30).forEach { add(kotlinx.serialization.json.JsonPrimitive(it.price)) } })
+                put("technicalIndicators", json.encodeToJsonElement(
+                    TechnicalAnalysisSnapshot.serializer(),
+                    TechnicalAnalysis.calculate(ticker.symbol, recentPrices)
+                ))
                 if (depth != null) {
                     put("bestBid", depth.bestBid ?: "unknown"); put("bestAsk", depth.bestAsk ?: "unknown")
                 }
@@ -155,6 +161,8 @@ class ReadOnlyAssistantService(
                     Ham alan adlarını (riskScore, held vb.) ve Unix zaman damgalarını kullanıcıya gösterme. Yanıtın sonuna ayrıca kaynak, veri zamanı veya piyasa modu satırı ekleme; uygulama mesajlarında yalnızca "ARGENT AI" etiketi ve yanıt metni gösterilir.
                     Veride olmayan geçmişi, gün içi değişimi veya nedenleri uydurma; veri eksikse bunu söyle.
                     Portföy hesabı ve karşılaştırması, piyasa özeti, emir durumu, risk göstergesi, doğal dilde emir geçmişi araması, mevcut veriye dayalı uyarı kontrolü ve aşağıda verilen demo senaryolarını açıklayabilirsin.
+                    Kullanıcı portföy aksiyon senaryolarını karşılaştırmanı isterse 2-3 tarafsız "mevcut durum / küçük değişiklik / daha dengeli dağılım" senaryosu sun. Her senaryoda yalnızca mevcut portföy verisinden hesaplanabilen tutar ve yoğunlaşma etkisini belirt; gelecekteki getiriyi tahmin etme ve al/sat talimatı verme. Kullanıcının yerine senaryo seçme.
+                    technicalIndicators verilmişse yalnızca bu hesaplanmış göstergeleri açıkla; gözlemlerin mum çubuğu veya sabit zaman aralıklı veri olmadığını belirt ve indikatörlerden tahmin/tavsiye üretme.
                     ARGENT riskScore değeri genel/kişisel yatırım risk notu değildir; her kotasyon para biriminde en büyük pozisyonun toplam pozisyon büyüklüğündeki yüzde payıdır. Spot işlemde marjin kapalıdır.
                     Portföyde değişim verisi yalnızca bugün kaydedilen ilk ölçüm ile mevcut ölçüm arasındaki farktır; gün başı verisi gibi sunma. İlk ölçüm yoksa değişim hesaplanamayacağını söyle. Olağandışı bakiye değişimi için geçmiş baz yoksa uyarı üretemezsin. Bloke bakiye `held` alanıdır.
                     Emir geçmişi sorularında historySearch alanındaki hazır filtre sonuçlarına ve kapsam sınırına dayan; kayıtlarda olmayan eski emirler hakkında kesin konuşma.

@@ -136,6 +136,24 @@ class ArgentApi(var baseUrl: String = "http://127.0.0.1:8080") {
     suspend fun orderBook(symbol: String): OrderBookDto = get("/api/v1/orderbook/$symbol")
     suspend fun ticker(symbol: String): TickerDto = get("/api/v1/ticker/$symbol")
     suspend fun history(symbol: String): List<TickerDto> = get("/api/v1/ticker/$symbol/history")
+    suspend fun technicalAnalysis(symbol: String): TechnicalAnalysisDto = get("/api/v1/technical-analysis/$symbol")
+    suspend fun externalMarketStatus(): ExternalMarketStatusDto = get("/api/v1/external-market/status")
+    suspend fun nasdaqQuote(symbol: String): ExternalQuoteDto = get("/api/v1/external-market/nasdaq/$symbol")
+    suspend fun marketNews(): List<MarketNewsDto> = get("/api/v1/external-market/news?category=general")
+    suspend fun priceAlerts(): List<PriceAlertDto> = get("/api/v1/price-alerts")
+    suspend fun createPriceAlert(symbol: String, direction: String, threshold: String): PriceAlertDto =
+        post("/api/v1/price-alerts", CreatePriceAlertDto(symbol, direction, threshold))
+    suspend fun deletePriceAlert(id: String) {
+        var response = client.delete("$baseUrl/api/v1/price-alerts/$id") {
+            token?.let { header("Authorization", "Bearer $it") }
+        }
+        if (response.status == HttpStatusCode.Unauthorized && refreshSession()) {
+            response = client.delete("$baseUrl/api/v1/price-alerts/$id") {
+                token?.let { header("Authorization", "Bearer $it") }
+            }
+        }
+        if (!response.status.isSuccess()) fail(response.bodyAsText())
+    }
     suspend fun balances(): List<BalanceDto> = get("/api/v1/balances")
     suspend fun positions(): List<PositionDto> = get("/api/v1/positions")
     suspend fun portfolio(): PortfolioDto = get("/api/v1/portfolio")
@@ -154,6 +172,10 @@ class ArgentApi(var baseUrl: String = "http://127.0.0.1:8080") {
         "/api/v1/assistant/chat",
         AssistantQuestionDto(question, symbol, draftSide, draftType, draftQuantity, draftPrice)
     )
+    suspend fun createAssistantOrderDraft(prompt: String): AssistantOrderDraftDto =
+        post("/api/v1/assistant/order-drafts", AssistantOrderDraftRequestDto(prompt))
+    suspend fun confirmAssistantOrderDraft(draftId: String, password: String): OrderResultDto =
+        post("/api/v1/assistant/order-drafts/$draftId/confirm", ConfirmAssistantOrderDraftRequestDto(password, true))
     suspend fun publicTrades(symbol: String): List<TradeDto> = get("/api/v1/trades?symbol=$symbol")
 
     suspend fun placeOrder(
@@ -338,6 +360,34 @@ class ArgentApi(var baseUrl: String = "http://127.0.0.1:8080") {
 @Serializable data class MeResponse(val userId: String, val email: String, val displayName: String, val role: String, val tenantId: String = "", val tenantRole: String = "VIEWER")
 @Serializable data class InstrumentDto(val symbol: String, val baseAsset: String, val quoteAsset: String, val assetClass: String, val displayName: String, val tickSize: String, val lotSize: String)
 @Serializable data class TickerDto(val symbol: String, val price: String, val bid: String? = null, val ask: String? = null, val volume24h: String? = null, val source: String? = null, val timestamp: Long = 0)
+@Serializable data class TechnicalAnalysisDto(
+    val symbol: String,
+    val currentPrice: String? = null,
+    val sma20: String? = null,
+    val sma50: String? = null,
+    val rsi14: String? = null,
+    val change20Pct: String? = null,
+    val support30: String? = null,
+    val resistance30: String? = null,
+    val sampleCount: Int = 0,
+    val trend: String = "INSUFFICIENT_DATA",
+    val source: String? = null,
+    val timestamp: Long = 0
+)
+@Serializable data class ExternalMarketStatusDto(val provider: String = "Finnhub", val configured: Boolean, val planNote: String = "")
+@Serializable data class ExternalQuoteDto(
+    val symbol: String, val price: String, val change: String? = null, val changePercent: String? = null,
+    val previousClose: String? = null, val timestamp: Long, val source: String = "Finnhub", val currency: String = "USD"
+)
+@Serializable data class MarketNewsDto(
+    val id: Long, val headline: String, val summary: String = "", val source: String = "", val url: String,
+    val publishedAt: Long, val relatedSymbols: String = ""
+)
+@Serializable data class CreatePriceAlertDto(val symbol: String, val direction: String, val threshold: String)
+@Serializable data class PriceAlertDto(
+    val id: String, val symbol: String, val direction: String, val threshold: String, val state: String,
+    val createdAt: Long, val triggeredAt: Long? = null, val triggeredPrice: String? = null
+)
 @Serializable data class DepthLevelDto(val price: String, val quantity: String, val orderCount: Int)
 @Serializable data class OrderBookDto(val symbol: String, val bids: List<DepthLevelDto> = emptyList(), val asks: List<DepthLevelDto> = emptyList(), val bestBid: String? = null, val bestAsk: String? = null)
 @Serializable data class BalanceDto(val userId: String, val asset: String, val available: String, val held: String, val version: Long = 0)
@@ -414,6 +464,13 @@ class ArgentApi(var baseUrl: String = "http://127.0.0.1:8080") {
     val dataAsOf: Long,
     val sources: List<String> = emptyList(),
     val marketMode: String
+)
+@Serializable data class AssistantOrderDraftRequestDto(val prompt: String)
+@Serializable data class ConfirmAssistantOrderDraftRequestDto(val password: String, val acknowledgeSummary: Boolean)
+@Serializable data class AssistantOrderDraftDto(
+    val draftId: String, val symbol: String, val side: String, val type: String,
+    val quantity: String, val price: String, val quoteNotional: String, val quoteAsset: String,
+    val source: String, val dataAsOf: Long, val expiresAt: Long, val note: String
 )
 @Serializable data class PlaceOrderRequest(
     val symbol: String,

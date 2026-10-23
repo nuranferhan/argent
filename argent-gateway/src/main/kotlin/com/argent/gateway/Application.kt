@@ -39,6 +39,9 @@ import com.argent.gateway.api.TickerResponse
 import com.argent.gateway.api.TokenResponse
 import com.argent.gateway.api.TradeInfo
 import com.argent.gateway.api.AssistantQuestionRequest
+import com.argent.gateway.api.AssistantOrderDraftRequest
+import com.argent.gateway.api.AssistantOrderDraftResponse
+import com.argent.gateway.api.ConfirmAssistantOrderRequest
 import com.argent.gateway.api.AssistantStatusResponse
 import com.argent.gateway.api.AssistantAlertsResponse
 import com.argent.gateway.api.WithdrawRequest
@@ -46,6 +49,7 @@ import com.argent.gateway.auth.AuthService
 import com.argent.gateway.assistant.ReadOnlyAssistantService
 import com.argent.gateway.assistant.AssistantPortfolioHistoryStore
 import com.argent.gateway.assistant.AssistantDraftOrder
+import com.argent.gateway.assistant.AssistantOrderDraftService
 import com.argent.gateway.auth.UserRole
 import com.argent.gateway.auth.TenantRole
 import com.argent.gateway.config.AppConfig
@@ -61,8 +65,13 @@ import com.argent.market.EventBroker
 import com.argent.market.MarketDataService
 import com.argent.market.MarketFeedMode
 import com.argent.market.TickerUpdate
+import com.argent.market.TechnicalAnalysis
 import com.argent.market.BinanceSpotTestnet
 import com.argent.market.BinanceTestnetException
+import com.argent.gateway.market.ExternalMarketDataService
+import com.argent.gateway.market.PriceAlertStore
+import com.argent.gateway.market.CreatePriceAlertRequest
+import com.argent.gateway.market.toResponse
 import com.argent.market.TestnetOrderRequest
 import com.argent.risk.RiskService
 import com.auth0.jwt.JWT
@@ -147,15 +156,29 @@ fun main() {
     val auth = AuthService(database, config.jwtSecret).also { it.initSchema() }
     val orders = OrderRepository(database).also { it.initSchema() }
     val engine = MatchingEngine(eventBus, keepRecordedEvents = false)
-    val market = MarketDataService(feedMode = config.marketFeedMode).also { it.start() }
+    val market = MarketDataService(feedMode = config.marketFeedMode, istfinApiKey = config.istfinApiKey).also { it.start() }
     val binanceTestnet = BinanceSpotTestnet(config.binanceSpotTestnetApiKey, config.binanceSpotTestnetSecret)
     val risk = RiskService(ledger)
     val assistant = ReadOnlyAssistantService.fromEnvironment()
+    val assistantOrderDrafts = AssistantOrderDraftService()
+    val externalMarketData = ExternalMarketDataService(System.getenv("FINNHUB_API_KEY")?.takeIf(String::isNotBlank))
+    val priceAlertStore = PriceAlertStore(database).also { it.initSchema() }
     val assistantPortfolioHistory = AssistantPortfolioHistoryStore(database).also { it.initSchema() }
     val prometheus = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
     val trading = TradingService(engine, ledger, risk, orders, market, prometheus)
     val limiter = RedisRateLimiter(config.redisUrl)
     val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    if (externalMarketData.status().configured) appScope.launch {
+        while (true) {
+            priceAlertStore.activeSymbols().forEach { symbol ->
+                runCatching {
+                    val quote = externalMarketData.quote(symbol)
+                    priceAlertStore.trigger(symbol, quote.price, quote.timestamp)
+                }.onFailure { log.debug("Price alert polling for {} deferred: {}", symbol, it.message) }
+            }
+            delay(60_000)
+        }
+    }
     val binanceTestnetExecution = BinanceTestnetExecutionService(database, ledger, binanceTestnet).also { it.initSchema() }
     if (binanceTestnet.configured) {
         appScope.launch {
@@ -321,10 +344,7 @@ fun main() {
                         matchingEngine = matchingEngine,
                         executionMode = "INTERNAL_MATCHING",
                         cryptoMarketData = market.cryptoFeedStatus(),
-                        bistMarketData = when (config.marketFeedMode) {
-                            MarketFeedMode.SIMULATED -> "SIMULATED"
-                            MarketFeedMode.BINANCE_PUBLIC -> "SIMULATED"
-                        }
+                        bistMarketData = market.bistFeedStatus()
                     )
                 )
             }
@@ -337,15 +357,24 @@ fun main() {
                     }
                 )
             }
+            get("/api/v1/external-market/status") { call.respond(externalMarketData.status()) }
             get("/api/v1/ticker/{symbol}") {
                 val symbol = call.parameters["symbol"]!!.uppercase()
+                if (Instruments.get(symbol) == null) return@get call.respond(HttpStatusCode.NotFound, ErrorResponse("Bilinmeyen sembol: $symbol"))
                 val live = market.lastTicker(symbol)
                 val price = live?.price ?: market.lastPrice(symbol)?.toPlainString()
-                    ?: return@get call.respond(HttpStatusCode.NotFound, ErrorResponse("Unknown symbol"))
-                call.respond(TickerResponse(symbol, price, live?.bid, live?.ask))
+                    ?: return@get call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse("$symbol için gerçek piyasa verisi mevcut değil"))
+                call.respond(TickerResponse(symbol, price, live?.bid, live?.ask, live?.volume24h, live?.source, live?.timestamp ?: 0L))
             }
             get("/api/v1/ticker/{symbol}/history") {
                 call.respond(market.history(call.parameters["symbol"]!!.uppercase()))
+            }
+            get("/api/v1/technical-analysis/{symbol}") {
+                val symbol = call.parameters["symbol"]!!.uppercase()
+                if (Instruments.get(symbol) == null) {
+                    return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("Bilinmeyen sembol: $symbol"))
+                }
+                call.respond(TechnicalAnalysis.calculate(symbol, market.history(symbol)))
             }
             get("/api/v1/orderbook/{symbol}") {
                 call.respond(engine.depth(call.parameters["symbol"]!!.uppercase()))
@@ -405,6 +434,51 @@ fun main() {
             }
 
             authenticate("auth") {
+                get("/api/v1/external-market/nasdaq/{symbol}") {
+                    val symbol = call.parameters["symbol"] ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("Sembol gerekli"))
+                    val quote = runCatching { externalMarketData.quote(symbol) }.getOrElse {
+                        val status = if (it.message?.contains("yapılandırılmamış") == true) HttpStatusCode.ServiceUnavailable else HttpStatusCode.BadGateway
+                        return@get call.respond(status, ErrorResponse(it.message ?: "Nasdaq verisi alınamadı"))
+                    }
+                    call.respond(quote)
+                }
+                get("/api/v1/external-market/news") {
+                    val category = call.request.queryParameters["category"] ?: "general"
+                    val news = runCatching { externalMarketData.news(category) }.getOrElse {
+                        val status = if (it.message?.contains("yapılandırılmamış") == true) HttpStatusCode.ServiceUnavailable else HttpStatusCode.BadGateway
+                        return@get call.respond(status, ErrorResponse(it.message ?: "Haber akışı alınamadı"))
+                    }
+                    call.respond(news)
+                }
+                get("/api/v1/price-alerts") {
+                    val p = call.principal<ArgentPrincipal>()!!
+                    call.respond(priceAlertStore.list(p.userId).map { it.toResponse() })
+                }
+                post("/api/v1/price-alerts") {
+                    val p = call.principal<ArgentPrincipal>()!!
+                    val request = call.receive<CreatePriceAlertRequest>()
+                    val symbol = request.symbol.trim().uppercase()
+                    val direction = request.direction.trim().uppercase()
+                    require(externalMarketData.status().configured) { "Gerçek fiyat alarmı için FINNHUB_API_KEY yapılandırılmalı" }
+                    require(symbol in ExternalMarketDataService.NASDAQ_WATCHLIST) { "Alarm yalnızca desteklenen Nasdaq sembollerinde kullanılabilir" }
+                    require(direction in setOf("ABOVE", "BELOW")) { "direction ABOVE veya BELOW olmalı" }
+                    val threshold = request.threshold.trim().replace(',', '.').toBigDecimalOrNull()
+                        ?: throw IllegalArgumentException("Eşik pozitif bir sayı olmalı")
+                    require(threshold.signum() > 0 && threshold.precision() <= 18 && threshold.scale() <= 8) { "Eşik pozitif olmalı ve en fazla 8 ondalık basamak içermeli" }
+                    require(priceAlertStore.list(p.userId).count { it.state == "ACTIVE" } < 20) { "En fazla 20 etkin fiyat alarmı oluşturabilirsiniz" }
+                    val currentQuote = runCatching { externalMarketData.quote(symbol) }.getOrElse {
+                        return@post call.respond(HttpStatusCode.BadGateway, ErrorResponse(it.message ?: "Gerçek fiyat doğrulanamadı; alarm kurulmadı"))
+                    }
+                    val created = priceAlertStore.create(p.userId, symbol, direction, threshold.stripTrailingZeros().toPlainString())
+                    priceAlertStore.trigger(symbol, currentQuote.price, currentQuote.timestamp)
+                    call.respond(HttpStatusCode.Created, priceAlertStore.list(p.userId).first { it.id == created.id }.toResponse())
+                }
+                delete("/api/v1/price-alerts/{id}") {
+                    val p = call.principal<ArgentPrincipal>()!!
+                    val id = call.parameters["id"] ?: return@delete call.respond(HttpStatusCode.BadRequest, ErrorResponse("Alarm kimliği gerekli"))
+                    if (!priceAlertStore.delete(p.userId, id)) return@delete call.respond(HttpStatusCode.NotFound, ErrorResponse("Alarm bulunamadı"))
+                    call.respond(mapOf("deleted" to true))
+                }
                 get("/api/v1/me") {
                     val p = call.principal<ArgentPrincipal>()!!
                     val user = auth.getUser(p.userId) ?: return@get call.respond(HttpStatusCode.NotFound, ErrorResponse("User not found"))
@@ -532,10 +606,11 @@ fun main() {
                     val snapshot = risk.portfolio(p.accountId, prices)
                     val baseline = assistantPortfolioHistory.recordAndGetDailyBaseline(p.accountId, snapshot, now)
                     val ticker = requestedSymbol?.let(market::lastTicker)
-                    val marketMode = "CRYPTO ${market.cryptoFeedStatus()} · BIST SIMULATED"
+                    val bistMode = market.bistFeedStatus()
+                    val marketMode = "CRYPTO ${market.cryptoFeedStatus()} · BIST $bistMode"
                     val sources = buildList {
                         add("ARGENT portföy ve sanal defter")
-                        add("CRYPTO ${market.cryptoFeedStatus()} · BIST SIMULATED")
+                        add(marketMode)
                         ticker?.let { add("${it.source} piyasa verisi: ${it.symbol}") }
                     }
                     call.respond(AssistantAlertsResponse(
@@ -571,7 +646,8 @@ fun main() {
                         if (type == "LIMIT") require(price != null && BigDecimal(price).signum() > 0)
                         AssistantDraftOrder(side, type, quantity, price)
                     }.getOrNull()
-                    val marketMode = "CRYPTO ${market.cryptoFeedStatus()} · BIST SIMULATED"
+                    val bistMode = market.bistFeedStatus()
+                    val marketMode = "CRYPTO ${market.cryptoFeedStatus()} · BIST $bistMode"
                     val answer = runCatching {
                         val portfolioSnapshot = risk.portfolio(p.accountId, market.allLastPrices())
                         val baseline = assistantPortfolioHistory.recordAndGetDailyBaseline(p.accountId, portfolioSnapshot, System.currentTimeMillis())
@@ -593,6 +669,32 @@ fun main() {
                         return@post call.respond(HttpStatusCode.BadGateway, ErrorResponse(it.message ?: "ARGENT AI yanıt veremedi."))
                     }
                     call.respond(answer)
+                }
+                post("/api/v1/assistant/order-drafts") {
+                    val p = call.principal<ArgentPrincipal>()!!
+                    if (p.tenantRole !in setOf(TenantRole.OWNER, TenantRole.ADMIN, TenantRole.TRADER)) {
+                        return@post call.respond(HttpStatusCode.Forbidden, ErrorResponse("Trading permission required"))
+                    }
+                    val body = call.receive<AssistantOrderDraftRequest>()
+                    val draft = assistantOrderDrafts.create(p.accountId, body.prompt, market)
+                    call.respond(HttpStatusCode.Created, draft)
+                }
+                post("/api/v1/assistant/order-drafts/{draftId}/confirm") {
+                    val p = call.principal<ArgentPrincipal>()!!
+                    if (!engine.isHealthy()) return@post call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse("Eşleştirme motoru sağlıklı değil; emir gönderilmedi."))
+                    if (p.tenantRole !in setOf(TenantRole.OWNER, TenantRole.ADMIN, TenantRole.TRADER)) {
+                        return@post call.respond(HttpStatusCode.Forbidden, ErrorResponse("Trading permission required"))
+                    }
+                    val body = call.receive<ConfirmAssistantOrderRequest>()
+                    if (!body.acknowledgeSummary) return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("Emir özeti açıkça onaylanmalı."))
+                    if (!auth.verifyPassword(p.userId, body.password)) return@post call.respond(HttpStatusCode.Unauthorized, ErrorResponse("Parola doğrulanamadı; emir gönderilmedi."))
+                    val draftId = call.parameters["draftId"] ?: return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("Taslak kimliği gerekli."))
+                    val result = trading.withAccountLock(p.accountId) {
+                        val current = auth.tenantAccess(p.userId, p.tenantId)
+                        if (current == null || current.accountId != p.accountId || current.role !in setOf(TenantRole.OWNER, TenantRole.ADMIN, TenantRole.TRADER)) null
+                        else trading.placeOrder(p.accountId, assistantOrderDrafts.confirm(p.accountId, draftId))
+                    } ?: return@post call.respond(HttpStatusCode.Forbidden, ErrorResponse("Tenant trading permission is no longer active"))
+                    call.respond(result)
                 }
                 get("/api/v1/orders") {
                     val p = call.principal<ArgentPrincipal>()!!

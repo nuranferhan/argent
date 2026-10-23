@@ -2,11 +2,11 @@
 
 ![Kotlin](https://img.shields.io/badge/Kotlin-7F52FF?logo=kotlin&logoColor=white) ![JDK 21](https://img.shields.io/badge/JDK-21-007396?logo=openjdk&logoColor=white) ![Ktor](https://img.shields.io/badge/Ktor-087CFA) ![PostgreSQL](https://img.shields.io/badge/PostgreSQL-4169E1?logo=postgresql&logoColor=white) ![Redis](https://img.shields.io/badge/Redis-DC382D?logo=redis&logoColor=white) ![RabbitMQ](https://img.shields.io/badge/RabbitMQ-FF6600?logo=rabbitmq&logoColor=white) ![Docker](https://img.shields.io/badge/Docker-2496ED?logo=docker&logoColor=white) ![Compose](https://img.shields.io/badge/Compose-Desktop%20%2B%20Android-4285F4?logo=jetpackcompose&logoColor=white)
 
-BIST hisseleri ve kripto paritelerini tek çatı altında işleyen; emir eşleştirme, canlı veri, portföy/risk ve çift girişli muhasebeyi olay tabanlı bir mimaride birleştiren mini borsa + aracı kurum.
+BIST hisseleri ve kripto pariteleri için piyasa ekranları sunan; emir eşleştirme, piyasa verisi, portföy/risk ve çift girişli muhasebeyi olay tabanlı bir mimaride birleştiren eğitim amaçlı mini borsa terminali.
 
 **JDK 21 · Kotlin · Ktor · PostgreSQL · Redis · RabbitMQ · Compose Desktop + Android**
 
-Varsayılan yerel çalışma kipinde ARGENT ücretsiz Binance public WebSocket'inden kripto kotasyonlarını alır; API anahtarı gerekmez, internet bağlantısı gerekir. BIST fiyatları simüledir. İnternetsiz geliştirme için `MARKET_DATA_MODE=SIMULATED` seçilebilir. Emirler ARGENT'in dahili eşleştirme motorunda işlenir; Binance public veri kipinde dışarı emir gönderilmez. Admin tarafından ayrıca yapılandırıldığında **Binance Spot Testnet** emir gönderme, sorgulama ve iptal akışını test eder. Testnet fill'leri ARGENT'in dahili eşleştirme motoruna girmez; gerçekleşen miktarlar, komisyonlar ve ayrılan/kalan rezerv ARGENT'in sanal ledger'ına işlenir. Bu sanal başlangıç bakiyesi Binance Testnet bakiyesinin içe aktarımı değildir; gerçek para değildir. Yerel CSV replay yalnızca kullanıcının kullanım hakkı olan verilerle çalışır. Bu proje gerçek borsa erişimi, lisanslı canlı BIST verisi veya müşteri fonu saklama hizmeti sunmaz.
+Varsayılan yerel çalışma kipinde ARGENT Binance public WebSocket'inden gerçek kripto kotasyonlarını alır; API anahtarı gerekmez, internet gerekir. BIST için doğrulanmış ücretsiz ve uygulama içinde gösterim hakkı olan bir API şu anda yapılandırılmış değildir; BIST fiyatları varsayılan olarak kullanılamaz, sahte değerle doldurulmaz. İsteğe bağlı istfin adaptörü ücretli API ve sağlayıcının izin verdiği kullanım koşullarıyla etkinleşir; anahtar ve gösterim hakkı gerekir. Nasdaq referans kotasyonları ve haber akışı, kullanıcı Finnhub API anahtarını eklediğinde etkinleşir; plan, kota ve gösterim lisansı sağlayıcı koşullarına bağlıdır. `MARKET_DATA_MODE=SIMULATED` yalnızca açıkça seçilen demo kipidir ve gerçek veri değildir. Emirler ARGENT'in dahili eşleştirme motorunda işlenir; market data akışları gerçek emir iletimi anlamına gelmez. Admin tarafından ayrıca yapılandırıldığında **Binance Spot Testnet** emir gönderme, sorgulama ve iptal akışını test eder; gerçek para değildir.
 
 ## Çalıştırmadan önce
 
@@ -16,7 +16,7 @@ Varsayılan yerel çalışma kipinde ARGENT ücretsiz Binance public WebSocket'i
 | JDK 21 | Evet | `java -version` → 21 |
 | `JWT_SECRET` | Yerelde varsayılan var | En az 32 karakter. Üretim/staging'de zorunlu ve gizli yönetilmeli |
 | `BOOTSTRAP_ADMIN_EMAIL` / `BOOTSTRAP_ADMIN_PASSWORD` | Evet | İlk veritabanı kurulumunda admin oluşturulur; mevcut veritabanında mevcut admin bilgileriyle giriş yapılır |
-| Dış veri API anahtarı | **Hayır** | Kriptoda varsayılan ücretsiz Binance public market-data akışı; internet gerekir. BIST simüledir |
+| Dış veri API anahtarı | Hayır (kripto için) | Binance public kripto akışı ücretsiz ve anahtarsızdır. BIST API için ücretsiz/lisansı doğrulanmış kaynak yapılandırılmamıştır; isteğe bağlı istfin erişimi ücretli olabilir. Nasdaq için isteğe bağlı `FINNHUB_API_KEY` |
 | Binance emir API anahtarı | **Hayır** | Yalnızca ayrıca etkinleştirilen Spot Testnet için isteğe bağlı; production URL/kodu yok |
 | `.env` içine kart / özel anahtar | **Hayır** | |
 
@@ -70,6 +70,10 @@ Android istemcisi Kotlin ve Jetpack Compose ile aynı gateway API'sini kullanır
 
 APK: `argent-android\build\outputs\apk\debug\argent-android-debug.apk`. Emülatörde gateway URL `http://10.0.2.2:8080`; USB ile bağlı telefonda yükleme betiği `adb reverse tcp:8080 tcp:8080` kurar ve uygulamada `http://127.0.0.1:8080` kullanılabilir. Debug yapısı yerel HTTP gateway'e izin verir; release manifesti açık metin trafiğini kapatır, dolayısıyla release/staging sunucusu HTTPS kullanmalıdır. Debug APK yalnızca yerel sandbox içindir, imzalı yayın paketi değildir.
 
+### Teknik görünüm
+
+Piyasa ekranı son fiyat gözlemlerinden SMA 20/50, RSI 14, son 20 gözlemin değişimi ve son 30 gözlemin düşük/yüksek değerlerini hesaplar. Bunlar zaman aralıklı mum verisi değildir; son 300 gözlem uygulama belleğinde tutulur ve gateway yeniden başladığında geçmiş sıfırlanır. Göstergeler betimleyicidir, yatırım tavsiyesi veya fiyat tahmini değildir.
+
 ### ARGENT AI Asistanı
 
 Terminal ve Android'deki ARGENT AI sekmesi varsayılan olarak kapalıdır. Groq API kullanımı hesap planına, seçilen modele ve sağlayıcının güncel fiyatlandırma ile kullanım limitlerine tabidir; ücretsiz erişim ve kotalar garanti edilmez ve değişebilir. Groq Console'dan API anahtarı oluşturup `.env` dosyasındaki `ARGENT_AI_API_KEY` değerine ekleyin; varsayılan URL ve model Groq uyumludur. İsteğe bağlı uyarı eşikleri `ARGENT_AI_BALANCE_CHANGE_ALERT_PCT` (varsayılan %10) ve `ARGENT_AI_CONCENTRATION_ALERT_PCT` (varsayılan %80) ile ayarlanabilir. Gateway'i yeniden oluşturun (`docker compose --profile app up -d --build gateway`). Asistan portföy, emir/işlem geçmişi ve seçili piyasa verisini yanıt üretmek için Groq'a iletir. Yanıtların altında kaynak, piyasa modu ve veri zamanı gösterilir; Binance Spot Testnet emirleri asistan bağlamında bulunmaz ve sorulduğunda açıkça belirtilir. Gün içi değişim, o gün kaydedilmiş ilk portföy örneğinden hesaplanır; gün başı geçmişi bulunduğu varsayılmaz. Emir geçmişi doğal dilde en son 500 kayıt içinde aranır. Uyarılar AI sekmesi açıkken 60 saniyede bir yenilenen ekranda gösterilir; push bildirimi değildir. Demo senaryoları adım adım açıklanır, emirleri kullanıcı kendisi verir. Sağlayıcının belgelerine göre çıkarım verileri varsayılan olarak saklanmaz; güvenilirlik/abuse incelemesi için istisnai durumlarda 30 güne kadar geçici kayıt olabilir. Gerçek kişisel/finansal verileri dış servise göndermeyin; ARGENT demo hesap verileriyle kullanın. Anahtar boşken hesap verisi sağlayıcıya gönderilmez. Asistan yalnızca okur ve açıklar; emir gönderemez, iptal edemez veya bakiye değiştiremez. Tarihsel başlangıç verisi yoksa günlük karşılaştırma yapılamadığını belirtir.
@@ -93,13 +97,15 @@ veya makinede `gradle` yoksa [Gradle 8.11.1](https://gradle.org/releases/) kurup
 
 ## Çalışma kipleri ve sınırlar
 
-- Varsayılan yerel açılış `MARKET_DATA_MODE=BINANCE_PUBLIC` ile tanımlı kripto paritelerine Binance public WebSocket kotasyonu, BIST sembollerine sentetik sandbox fiyatı sağlar; Binance API anahtarı gerekmez, internet gerekir.
+- Varsayılan yerel açılış `MARKET_DATA_MODE=BINANCE_PUBLIC` ile ücretsiz, gerçek Binance kripto kotasyonlarını alır. BIST için ücretsiz ve ARGENT'te gösterim hakkı doğrulanmış bir API yapılandırılmadığından BIST fiyatı varsayılan olarak sunulmaz.
 - İnternetsiz çalışma için `MARKET_DATA_MODE=SIMULATED` tüm tanımlı kripto ve BIST sembollerine sentetik sandbox fiyatı üretir.
 - Simülasyon kipi sabit tohumlu, sembol başına stokastik fiyat yolu kullanır; bu üretilmiş fiyatlar gerçek piyasa kotasyonu değildir ve gerçek emir yürütme/uyum yerine geçmez.
-- `MARKET_DATA_MODE=BINANCE_PUBLIC`, kripto piyasa verisini Binance public WebSocket'ten alır ve BIST sembolleri için sentetik sandbox verisi kullanır; emirler dışarı iletilmez.
+- İsteğe bağlı `MARKET_DATA_MODE=ISTFIN_BIST`, istfin API erişimi varsa BIST kotasyonlarını Binance kripto akışıyla birlikte alır. Bu entegrasyon ücretsiz değildir; güncel fiyat, gecikme ve ARGENT ekranında gösterim hakkını sağlayıcıyla doğrulayın. Anahtar yoksa BIST için sentetik fiyat üretilmez.
+- `MARKET_DATA_MODE=BINANCE_PUBLIC`, yalnızca kripto piyasa verisini Binance public WebSocket'ten alır; BIST health alanı `UNAVAILABLE` olur. `MARKET_DATA_MODE=SIMULATED` açıkça seçilirse sentetik örnek fiyatlar üretilir.
+- İsteğe bağlı `FINNHUB_API_KEY`, Piyasa İşleri bölümünde Nasdaq referans fiyatları, haber akışı ve tetikleyici fiyat alarmlarını açar. Veriler dış borsa emir defterine bağlı değildir; Finnhub plan/kota/erişim koşulları geçerlidir. Alarmlar kullanıcı hesabında saklanır ve gateway çalışırken en çok dakikada bir kontrol edilir. Bunlar push bildirimi değildir; uygulamadaki alarm durumu tetiklenmiş olarak gösterilir. Finnhub kişisel kullanım planı yeniden dağıtım hakkı vermez; ARGENT'i başkalarına/çoklu kullanıcıya sunmadan önce sağlayıcıdan uygun lisans alın.
 - Binance Spot Testnet emirleri yalnızca `BINANCE_SPOT_TESTNET_API_KEY` ve `BINANCE_SPOT_TESTNET_SECRET` yerel ortam değişkenleri birlikte ayarlanırsa açılır. Bu anahtarlar sadece Testnet API izinleriyle oluşturulmalı ve `.env` içinde tutulmalıdır; `.env` Git tarafından ignore edilir. API endpoint'i production host'a gönderemez. Testnet uçları yalnızca global ADMIN'e açıktır; Binance Testnet'te gerçekleşen fill'ler ledger'da tekilleştirilerek işlenir. Testnet hesabında da sanal fon bulunması gerekir.
 - Desktop `Çalışma alanı` penceresindeki Binance Spot Testnet bölümü etkinlik durumunu gösterir ve test emri gönderme, durum sorgulama, iptal işlemlerini sunar. LIMIT emirlerde GTC/IOC/FOK; ayrıca MARKET emri desteklenir. Emir gönderiminde ARGENT'te gereken varlık geçici rezerve edilir; fill'ler ve komisyonlar ledger'a, iptal/tamamlanmada kullanılmayan rezerv kullanılabilir bakiyeye döner. Gateway açıkken açık emirler periyodik olarak sorgulanır; yansıtmada bir sorun olursa rezerv otomatik çözülmez ve durum inceleme için işaretlenir. ARGENT'in demo başlangıç tutarları Binance Testnet bakiyesini otomatik kopyalamaz.
-- BIST varsayılanı `SIMULATED` kalır. Admin'in `POST /api/v1/admin/market-data/bist/replay` çağrısı, `timestamp,symbol,price[,volume24h]` başlıklı kullanıcı CSV'sini zaman sıralı olarak ticker akışına oynatır; timestamp Unix milisaniye veya ISO-8601 olabilir. Yalnızca tanımlı EQUITY sembolleri kabul edilir (azami 50.000 satır/2 MiB); `speed` alanı zaman aralıklarını böler (varsayılan 1000), replay sürerken BIST simülatörü duraklar. Durum: `GET /api/v1/admin/market-data/bist/replay`. CSV örneği ve komut [docs/market-data.md](docs/market-data.md) içinde. Replay özelliği veri lisansı sağlamaz; veri kaynağının kullanım/yeniden dağıtım koşullarını kullanıcı doğrular.
+- BIST için açık demo kipinde (`MARKET_DATA_MODE=SIMULATED`) stokastik örnek fiyat üretilebilir. Varsayılan gerçek-veri kipinde BIST simüle edilmez. Admin'in `POST /api/v1/admin/market-data/bist/replay` çağrısı, kullanım hakkı olan kullanıcı CSV'sini oynatabilir; replay özelliği lisans sağlamaz.
 - Aynı kullanıcının alış/satış emirlerinin çapraz defter oluşturmasını önlemek için kendi bekleyen likiditesiyle kesişen yeni emir taker seviyesinde iptal edilir.
 - Para yatırma/çekme API uçları, harici sağlayıcı ve mutabakat entegrasyonu olmadığı için `503 Service Unavailable` döndürür; ledger bakiyesini tek başına değiştirmez.
 - Yerel geliştirme başlatıcısı paper bakiye ve dahili likidite sağlayıcısını etkinleştirir; bu bakiyeler gerçek para değildir. `ARGENT_ENV` dev dışında ise bu tohumlama güvenlik nedeniyle reddedilir.
@@ -131,7 +137,8 @@ flowchart LR
   G --> E[argent-engine]
   G --> M[argent-market]
   M -->|public market data| B[Binance]
-  M -. dev only .-> BIST[BIST sim feed]
+  M -->|not configured by default| BIST[BIST unavailable]
+  M -. explicit demo mode .-> SIM[BIST simulated]
   L --> PG[(PostgreSQL)]
   G --> RD[(Redis rate-limit)]
   G --> AMQP[RabbitMQ fan-out]
@@ -176,6 +183,8 @@ Invoke-RestMethod http://127.0.0.1:8080/api/v1/admin/ledger/reconciliation -Head
 - `POST /api/v1/auth/register|login|refresh`; public registration is dev-only, while production users join through `POST /api/v1/auth/register/invitation` with an email-bound invitation.
 - `GET /api/v1/tenants`, `POST /api/v1/tenants/switch`, tenant admin `GET /api/v1/tenants/members`, `PATCH /api/v1/tenants/members/{userId}/role`, `DELETE /api/v1/tenants/members/{userId}`, owner `DELETE /api/v1/tenants/current`, `POST /api/v1/tenants/invitations`, `POST /api/v1/tenants/invitations/accept`
 - `GET /api/v1/instruments|orderbook/{symbol}|ticker/{symbol}|trades`
+- `GET /api/v1/external-market/status|nasdaq/{symbol}|news` (Nasdaq quote/news require login and configured Finnhub key; only supported watchlist symbols are queried)
+- `GET|POST /api/v1/price-alerts`, `DELETE /api/v1/price-alerts/{id}` (personal threshold alerts; above/below, trigger monitoring runs server-side)
 - `POST /api/v1/orders`  (`Idempotency-Key` veya `clientOrderId`)
 - `DELETE /api/v1/orders/{id}?symbol=`
 - `GET /api/v1/portfolio|balances|positions|orders|fills`

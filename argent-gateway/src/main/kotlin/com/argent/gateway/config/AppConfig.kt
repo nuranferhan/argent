@@ -18,6 +18,7 @@ data class AppConfig(
     val seedMarketMaker: Boolean,
     val seedDemoFunds: Boolean,
     val marketFeedMode: MarketFeedMode,
+    val istfinApiKey: String?,
     val marketMakerPassword: String,
     val binanceSpotTestnetApiKey: String?,
     val binanceSpotTestnetSecret: String?
@@ -73,7 +74,11 @@ data class AppConfig(
             val marketFeedMode = runCatching {
                 MarketFeedMode.valueOf((System.getenv("MARKET_DATA_MODE") ?: "BINANCE_PUBLIC").trim().uppercase())
             }.getOrElse {
-                error("MARKET_DATA_MODE must be SIMULATED or BINANCE_PUBLIC")
+                error("MARKET_DATA_MODE must be SIMULATED, BINANCE_PUBLIC, or ISTFIN_BIST")
+            }
+            val istfinApiKey = System.getenv("ISTFIN_API_KEY")?.takeIf(String::isNotBlank)
+            require(env == "dev" || marketFeedMode != MarketFeedMode.ISTFIN_BIST || istfinApiKey != null) {
+                "ISTFIN_API_KEY is required when MARKET_DATA_MODE=ISTFIN_BIST"
             }
             val binanceTestnetKey = System.getenv("BINANCE_SPOT_TESTNET_API_KEY")?.takeIf(String::isNotBlank)
             val binanceTestnetSecret = System.getenv("BINANCE_SPOT_TESTNET_SECRET")?.takeIf(String::isNotBlank)
@@ -105,6 +110,7 @@ data class AppConfig(
                 seedMarketMaker = seedMarketMaker,
                 seedDemoFunds = seedDemoFunds,
                 marketFeedMode = marketFeedMode,
+                istfinApiKey = istfinApiKey,
                 marketMakerPassword = System.getenv("MARKET_MAKER_PASSWORD")
                     ?.takeIf(String::isNotBlank)
                     ?: java.util.UUID.randomUUID().toString() + "aA1!",

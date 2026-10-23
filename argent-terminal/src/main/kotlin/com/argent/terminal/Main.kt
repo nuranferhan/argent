@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.gestures.detectDragGestures
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -50,6 +51,8 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.input.pointer.pointerInput
+import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
 import androidx.compose.ui.graphics.Brush
@@ -63,6 +66,7 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.res.painterResource
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Window
@@ -76,6 +80,7 @@ import com.argent.terminal.api.OrderBookDto
 import com.argent.terminal.api.OrderDto
 import com.argent.terminal.api.PortfolioDto
 import com.argent.terminal.api.TickerDto
+import com.argent.terminal.api.TechnicalAnalysisDto
 import com.argent.terminal.api.TradeDto
 import com.argent.terminal.api.TenantDto
 import com.argent.terminal.api.TenantMemberDto
@@ -84,6 +89,11 @@ import com.argent.terminal.api.BinanceTestnetStatusDto
 import com.argent.terminal.api.BinanceTestnetOrderDto
 import com.argent.terminal.api.BinanceTestnetOrderRequestDto
 import com.argent.terminal.api.BistReplayDto
+import com.argent.terminal.api.ExternalQuoteDto
+import com.argent.terminal.api.MarketNewsDto
+import com.argent.terminal.api.PriceAlertDto
+import com.argent.terminal.api.ExternalMarketStatusDto
+import com.argent.terminal.api.AssistantOrderDraftDto
 import com.argent.terminal.ui.ArgentBg
 import com.argent.terminal.ui.ArgentBlue
 import com.argent.terminal.ui.ArgentColors
@@ -99,6 +109,9 @@ import com.argent.terminal.ui.ArgentRed
 import com.argent.terminal.ui.ArgentRedDim
 import com.argent.terminal.ui.ArgentSilver
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
 import java.math.BigDecimal
@@ -219,6 +232,7 @@ private fun TradingDesk(api: ArgentApi, me: MeResponse, onLogout: () -> Unit, on
     var instruments by remember { mutableStateOf(listOf<InstrumentDto>()) }
     var symbol by remember { mutableStateOf("THYAO") }
     var book by remember { mutableStateOf(OrderBookDto(symbol)) }
+    var technicalAnalysis by remember { mutableStateOf<TechnicalAnalysisDto?>(null) }
     val tickers = remember { mutableStateMapOf<String, TickerDto>() }
     val chart = remember { mutableStateListOf<Float>() }
     var portfolio by remember { mutableStateOf<PortfolioDto?>(null) }
@@ -226,6 +240,7 @@ private fun TradingDesk(api: ArgentApi, me: MeResponse, onLogout: () -> Unit, on
     var fills by remember { mutableStateOf(listOf<TradeDto>()) }
     var blotter by remember { mutableStateOf(listOf<TradeDto>()) }
     var tab by remember { mutableStateOf(0) }
+    var bottomDockHeight by remember { mutableStateOf(420.dp) }
     var side by remember { mutableStateOf("BUY") }
     var type by remember { mutableStateOf("LIMIT") }
     var price by remember { mutableStateOf("") }
@@ -250,8 +265,15 @@ private fun TradingDesk(api: ArgentApi, me: MeResponse, onLogout: () -> Unit, on
     }
     LaunchedEffect(symbol) {
         chart.clear()
+        technicalAnalysis = null
         runCatching { api.history(symbol).forEach { it.price.toFloatOrNull()?.let(chart::add) } }
         launch { api.orderBookFlow(symbol).collect { book = it } }
+        launch {
+            while (true) {
+                runCatching { api.technicalAnalysis(symbol) }.onSuccess { technicalAnalysis = it }
+                delay(3_000)
+            }
+        }
     }
     LaunchedEffect(book.bestBid, book.bestAsk, side, type) {
         if (type == "MARKET") return@LaunchedEffect
@@ -307,7 +329,7 @@ private fun TradingDesk(api: ArgentApi, me: MeResponse, onLogout: () -> Unit, on
         Row(Modifier.weight(1f).fillMaxWidth()) {
             Watchlist(instruments, tickers, symbol) { symbol = it; price = "" }
             Column(Modifier.weight(1f).fillMaxHeight()) {
-                ChartPanel(symbol, tickers[symbol], chart, book)
+                ChartPanel(symbol, tickers[symbol], chart, book, technicalAnalysis)
                 OrderBookPanel(book) { clicked -> price = clicked }
             }
             Ticket(
@@ -351,7 +373,7 @@ private fun TradingDesk(api: ArgentApi, me: MeResponse, onLogout: () -> Unit, on
                 }
             )
         }
-        BottomDock(tab, { tab = it }, portfolio, orders, fills, blotter, tickers, api, me, symbol, side, type, qty, price, scope) { flash = it }
+        BottomDock(tab, { tab = it }, bottomDockHeight, { bottomDockHeight = it }, portfolio, orders, fills, blotter, tickers, api, me, symbol, side, type, qty, price, scope) { flash = it }
     }
 }
 
@@ -726,7 +748,7 @@ private fun Watchlist(
 }
 
 @Composable
-private fun ChartPanel(symbol: String, ticker: TickerDto?, points: List<Float>, book: OrderBookDto) {
+private fun ChartPanel(symbol: String, ticker: TickerDto?, points: List<Float>, book: OrderBookDto, analysis: TechnicalAnalysisDto?) {
     val change = if (points.size >= 2) points.last() - points.first() else 0f
     val changePct = if (points.size >= 2 && points.first() != 0f) change / points.first() * 100f else 0f
     Column(
@@ -786,6 +808,27 @@ private fun ChartPanel(symbol: String, ticker: TickerDto?, points: List<Float>, 
             Text(((points.size + 1) / 2).coerceAtLeast(1).toString(), color = ArgentMuted, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
             Text(points.size.coerceAtLeast(1).toString(), color = ArgentMuted, fontSize = 9.sp, fontFamily = FontFamily.Monospace)
         }
+        Spacer(Modifier.height(7.dp))
+        Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+            TechnicalMetric("TREND", when (analysis?.trend) { "UPWARD" -> "Yukarı"; "DOWNWARD" -> "Aşağı"; "MIXED" -> "Karışık"; else -> "Veri bekleniyor" })
+            TechnicalMetric("RSI 14", analysis?.rsi14 ?: "—")
+            TechnicalMetric("SMA 20", analysis?.sma20 ?: "—")
+            TechnicalMetric("SMA 50", analysis?.sma50 ?: "—")
+            TechnicalMetric("20 örnek %", analysis?.change20Pct ?: "—")
+            TechnicalMetric("Örnek", analysis?.sampleCount?.toString() ?: "0")
+        }
+        val observedAt = analysis?.timestamp?.takeIf { it > 0 }?.let {
+            java.text.SimpleDateFormat("HH:mm:ss", Locale.getDefault()).format(java.util.Date(it))
+        } ?: "—"
+        Text("Son fiyat gözlemleri · ${analysis?.source ?: ticker?.source ?: "kaynak bekleniyor"} · $observedAt · Yatırım tavsiyesi değildir", color = ArgentMuted, fontSize = 9.sp)
+    }
+}
+
+@Composable
+private fun TechnicalMetric(label: String, value: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(label, color = ArgentMuted, fontSize = 9.sp)
+        Text(value, color = ArgentSilver, fontSize = 11.sp, fontFamily = FontFamily.Monospace)
     }
 }
 
@@ -916,6 +959,8 @@ private fun Ticket(
 private fun BottomDock(
     tab: Int,
     onTab: (Int) -> Unit,
+    height: androidx.compose.ui.unit.Dp,
+    onHeightChange: (androidx.compose.ui.unit.Dp) -> Unit,
     portfolio: PortfolioDto?,
     orders: List<OrderDto>,
     fills: List<TradeDto>,
@@ -931,7 +976,26 @@ private fun BottomDock(
     scope: kotlinx.coroutines.CoroutineScope,
     onFlash: (String) -> Unit
 ) {
-    Column(Modifier.fillMaxWidth().height(if (tab == 4) 420.dp else 268.dp).background(ArgentPanelAlt)) {
+    val currentHeight = rememberUpdatedState(height)
+    val updateHeight = rememberUpdatedState(onHeightChange)
+    Column(Modifier.fillMaxWidth().height(height).background(ArgentPanelAlt)) {
+        Box(
+            modifier = Modifier.fillMaxWidth().height(12.dp)
+                .pointerInput(Unit) {
+                    var dragHeight = currentHeight.value
+                    detectDragGestures(
+                        onDragStart = { dragHeight = currentHeight.value },
+                        onDrag = { change, dragAmount ->
+                            change.consume()
+                            dragHeight = (dragHeight - dragAmount.y.toDp()).coerceIn(180.dp, 700.dp)
+                            updateHeight.value(dragHeight)
+                        }
+                    )
+                },
+            contentAlignment = Alignment.Center
+        ) {
+            Box(Modifier.width(42.dp).height(3.dp).background(ArgentMuted, RoundedCornerShape(50)))
+        }
         TabRow(selectedTabIndex = tab, containerColor = ArgentPanel, contentColor = ArgentGold) {
             listOf("Portföy", "Açık emirler", "İşlemlerim", "Piyasa işleri", "ARGENT AI").forEachIndexed { i, t ->
                 Tab(selected = tab == i, onClick = { onTab(i) }, text = { Text(t, fontSize = 12.sp) })
@@ -941,9 +1005,111 @@ private fun BottomDock(
             0 -> PortfolioTab(portfolio, tickers)
             1 -> OrdersTab(orders, api, scope, onFlash)
             2 -> TradesTab(fills, orders)
-            3 -> TradesTab(blotter)
+            3 -> ExternalMarketsTab(api, scope, onFlash, blotter)
             else -> AssistantTab(api, selectedSymbol, draftSide, draftType, draftQuantity, draftPrice, scope)
         }
+    }
+}
+
+@Composable
+private fun ExternalMarketsTab(api: ArgentApi, scope: kotlinx.coroutines.CoroutineScope, onFlash: (String) -> Unit, trades: List<TradeDto>) {
+    val uriHandler = LocalUriHandler.current
+    val symbols = listOf("AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA")
+    var provider by remember { mutableStateOf<ExternalMarketStatusDto?>(null) }
+    var quotes by remember { mutableStateOf(emptyMap<String, ExternalQuoteDto>()) }
+    var news by remember { mutableStateOf(emptyList<MarketNewsDto>()) }
+    var alerts by remember { mutableStateOf(emptyList<PriceAlertDto>()) }
+    var feedError by remember { mutableStateOf<String?>(null) }
+    var loadingExternalData by remember { mutableStateOf(false) }
+    var selected by remember { mutableStateOf("AAPL") }
+    var threshold by remember { mutableStateOf("") }
+    var direction by remember { mutableStateOf("ABOVE") }
+    val refresh: suspend () -> Unit = {
+        loadingExternalData = true
+        try {
+            provider = runCatching { api.externalMarketStatus() }.getOrNull()
+            if (provider?.configured == true) {
+                val (quoteResults, newsResult) = coroutineScope {
+                    val quotesJob = async { symbols.map { symbol -> async { runCatching { api.nasdaqQuote(symbol) } } }.awaitAll() }
+                    val newsJob = async { runCatching { api.marketNews() } }
+                    quotesJob.await() to newsJob.await()
+                }
+                val receivedQuotes = quoteResults.mapNotNull { it.getOrNull()?.let { quote -> quote.symbol to quote } }.toMap()
+                if (receivedQuotes.isNotEmpty()) quotes = receivedQuotes
+                feedError = quoteResults.firstNotNullOfOrNull { it.exceptionOrNull()?.message }
+                newsResult.onSuccess { news = it }.onFailure { if (feedError == null) feedError = it.message }
+            } else {
+                quotes = emptyMap()
+                news = emptyList()
+                feedError = if (provider == null) "Gateway veri durumu alınamadı." else null
+            }
+            alerts = runCatching { api.priceAlerts() }.getOrDefault(alerts)
+        } finally {
+            loadingExternalData = false
+        }
+    }
+    LaunchedEffect(Unit) { while (true) { refresh(); kotlinx.coroutines.delay(60_000) } }
+    LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        item {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Column {
+                    Text("NASDAQ · GERÇEK PİYASA REFERANSI", color = ArgentGold, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+                    Text(if (provider?.configured == true) "Finnhub · API anahtarı bağlı; veri erişimi sağlayıcı hesabına bağlı" else "Gerçek veri kaynağı henüz yapılandırılmadı", color = ArgentMuted, fontSize = 10.sp)
+                }
+                TextButton(onClick = { scope.launch { refresh() } }) { Text("YENİLE", color = ArgentBlue) }
+            }
+            if (loadingExternalData) Text("Finnhub kotasyonları ve haber akışı yükleniyor…", color = ArgentMuted, fontSize = 10.sp)
+            if (provider?.configured == false) Text("FINNHUB_API_KEY ekleyince hesabınızın kapsamındaki Nasdaq referans fiyatları ve haber akışı açılır. Demo fiyatı gösterilmiyor.", color = ArgentSilver, fontSize = 10.sp, lineHeight = 14.sp)
+            if (provider?.configured == true && feedError != null) Text("Gerçek veri alınamadı: $feedError", color = ArgentRed, fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            if (provider?.configured == true && !loadingExternalData && quotes.isEmpty() && feedError == null) Text("Kotasyon dönmedi. Yenile'ye basıp sağlayıcı erişimini tekrar deneyin.", color = ArgentRed, fontSize = 10.sp)
+        }
+        if (provider?.configured == true) {
+            item {
+                Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    quotes.values.forEach { q ->
+                        Surface(Modifier.weight(1f).clickable { selected = q.symbol }, color = if (selected == q.symbol) ArgentGoldDim else ArgentPanel, shape = RoundedCornerShape(7.dp)) {
+                            Column(Modifier.padding(7.dp)) {
+                                Text(q.symbol, color = ArgentSilver, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text("USD ${q.price}", color = ArgentGold, fontSize = 10.sp, fontFamily = FontFamily.Monospace)
+                                Text("${q.changePercent ?: "—"}%", color = ArgentMuted, fontSize = 9.sp)
+                                Text("Finnhub · ${java.text.SimpleDateFormat("HH:mm", Locale.getDefault()).format(java.util.Date(q.timestamp))}", color = ArgentMuted, fontSize = 8.sp)
+                            }
+                        }
+                    }
+                }
+            }
+            item {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    Text("Fiyat alarmı", color = ArgentSilver, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    listOf("ABOVE" to "Üstüne çıkarsa", "BELOW" to "Altına inerse").forEach { (value, label) ->
+                        TextButton(onClick = { direction = value }) { Text(if (direction == value) "✓ $label" else label, color = if (direction == value) ArgentGold else ArgentMuted, fontSize = 9.sp) }
+                    }
+                    OutlinedTextField(threshold, { threshold = it }, Modifier.width(110.dp).height(48.dp), placeholder = { Text("USD eşik", fontSize = 10.sp) }, singleLine = true, textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp), colors = fieldColors())
+                    Button(onClick = {
+                        scope.launch { runCatching { api.createPriceAlert(selected, direction, threshold); threshold = ""; alerts = api.priceAlerts() }
+                            .onSuccess { onFlash("$selected fiyat alarmı kuruldu") }.onFailure { onFlash("Alarm kurulamadı: ${it.message}") } }
+                    }, enabled = threshold.toBigDecimalOrNull()?.signum() == 1) { Text("KUR") }
+                }
+                alerts.forEach { alert ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text("${alert.symbol} ${if (alert.direction == "ABOVE") "≥" else "≤"} USD ${alert.threshold} · ${if (alert.state == "ACTIVE") "bekliyor" else "tetiklendi @ USD ${alert.triggeredPrice}"}", color = if (alert.state == "TRIGGERED") ArgentGreen else ArgentMuted, fontSize = 10.sp)
+                        TextButton(onClick = { scope.launch { runCatching { api.deletePriceAlert(alert.id); alerts = api.priceAlerts() }.onFailure { onFlash("Alarm silinemedi") } } }) { Text("Sil", color = ArgentRed, fontSize = 10.sp) }
+                    }
+                }
+            }
+            item { Text("PİYASA HABERLERİ", color = ArgentGold, fontWeight = FontWeight.Bold, fontSize = 11.sp) }
+            if (!loadingExternalData && news.isEmpty()) item { Text("Haber alınamadı veya sağlayıcı boş liste döndürdü.", color = if (feedError != null) ArgentRed else ArgentMuted, fontSize = 10.sp) }
+            items(news.take(8)) { item ->
+                Surface(color = ArgentPanel, shape = RoundedCornerShape(7.dp)) {
+                    Column(Modifier.fillMaxWidth().clickable { runCatching { uriHandler.openUri(item.url) } }.padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
+                        Text(item.headline, color = ArgentSilver, fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text("${item.source} · ${item.relatedSymbols.ifBlank { "Piyasa" }} · ${java.text.SimpleDateFormat("dd.MM HH:mm", Locale.getDefault()).format(java.util.Date(item.publishedAt))}", color = ArgentMuted, fontSize = 9.sp)
+                    }
+                }
+            }
+        }
+        item { Text("ARGENT piyasa işlemleri · ${trades.size} kayıt", color = ArgentGold, fontSize = 10.sp, fontWeight = FontWeight.Bold) }
+        items(trades.take(10)) { trade -> Text("${trade.symbol}  ${trade.quantity} @ ${trade.price}", color = ArgentMuted, fontSize = 10.sp) }
     }
 }
 
@@ -971,19 +1137,10 @@ private fun AssistantTab(
     var prompt by remember { mutableStateOf("") }
     var enabled by remember { mutableStateOf<Boolean?>(null) }
     var busy by remember { mutableStateOf(false) }
-    var alerts by remember { mutableStateOf<List<String>>(emptyList()) }
-    var alertMetadata by remember { mutableStateOf("") }
+    var pendingOrderDraft by remember { mutableStateOf<AssistantOrderDraftDto?>(null) }
+    var confirmOrderDraft by remember { mutableStateOf(false) }
+    var orderConfirmPassword by remember { mutableStateOf("") }
     LaunchedEffect(Unit) { runCatching { enabled = api.assistantStatus().enabled } }
-    LaunchedEffect(symbol) {
-        while (true) {
-            runCatching { api.assistantAlerts(symbol) }.onSuccess { result ->
-                alerts = result.alerts
-                val time = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(result.dataAsOf))
-                alertMetadata = "Kaynak: ${result.sources.joinToString()} · Veri: $time"
-            }
-            kotlinx.coroutines.delay(60_000)
-        }
-    }
     LaunchedEffect(messages.size, busy) { if (messages.isNotEmpty()) listState.animateScrollToItem(0) }
     Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(7.dp)) {
         Row(Modifier.fillMaxWidth(), verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.SpaceBetween) {
@@ -992,23 +1149,16 @@ private fun AssistantTab(
                 Text("Portföy · emirler · $symbol", color = ArgentMuted, fontSize = 10.sp)
             }
             Surface(color = ArgentGreenDim, shape = RoundedCornerShape(50)) {
-                Text("SALT OKUNUR", color = ArgentGreen, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
+                Text("ONAYLI TASLAK", color = ArgentGreen, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
             }
         }
         Text(
             when (enabled) {
-                true -> "ARGENT verileriyle yanıtlar · Emir veya bakiye değişikliği yapamaz"
+                true -> "Yanıtlar ve emir taslakları · Emir yalnızca parola ile açık onaydan sonra gönderilir"
                 false -> "Asistan kapalı · Gateway AI anahtarını kontrol et"
                 null -> "Asistan bağlantısı kontrol ediliyor…"
             }, color = ArgentMuted, fontSize = 10.sp
         )
-        if (alerts.isNotEmpty()) Surface(color = ArgentPanelAlt, shape = RoundedCornerShape(9.dp)) {
-            Column(Modifier.fillMaxWidth().padding(horizontal = 10.dp, vertical = 7.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                Text("UYARILAR", color = ArgentGold, fontSize = 9.sp, fontWeight = FontWeight.Bold)
-                alerts.forEach { Text("• $it", color = ArgentSilver, fontSize = 9.sp, lineHeight = 12.sp) }
-                Text(alertMetadata, color = ArgentMuted, fontSize = 9.sp, lineHeight = 12.sp)
-            }
-        }
         if (messages.isEmpty()) {
             Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.Center) {
                 Text("Nasıl yardımcı olabilirim?", color = ArgentSilver, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
@@ -1028,23 +1178,40 @@ private fun AssistantTab(
                 items(messages.size) { index -> AssistantMessageBubble(messages[messages.lastIndex - index]) }
             }
         }
+        pendingOrderDraft?.let { draft ->
+            Surface(color = ArgentPanelAlt, shape = RoundedCornerShape(10.dp)) {
+                Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("EMİR TASLAĞI · GÖNDERİLMEDİ", color = ArgentGold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("${draft.symbol} ${if (draft.side == "BUY") "ALIŞ" else "SATIŞ"} LIMIT · ${draft.quantity} @ ${draft.price} ${draft.quoteAsset}", color = ArgentSilver, fontSize = 11.sp)
+                    val quoteTime = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(draft.dataAsOf))
+                    Text("Tahmini tutar ${draft.quoteNotional} ${draft.quoteAsset} · ${draft.source} · veri ${quoteTime}. ${draft.note}", color = ArgentMuted, fontSize = 10.sp)
+                    Button(onClick = { confirmOrderDraft = true }, colors = ButtonDefaults.buttonColors(containerColor = ArgentGold, contentColor = ArgentBg)) { Text("ÖZETİ ONAYLA VE PAROLAYLA GÖNDER") }
+                }
+            }
+        }
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(
                 value = prompt, onValueChange = { prompt = it }, enabled = !busy,
                 placeholder = { Text("ARGENT'e sor…") }, minLines = 1, maxLines = 3,
                 modifier = Modifier.weight(1f), colors = fieldColors()
             )
-            Button(enabled = !busy && prompt.isNotBlank() && enabled != false, onClick = {
+            Button(enabled = !busy && prompt.isNotBlank() && (enabled != false || looksLikeOrderDraftRequest(prompt)), onClick = {
                 val question = prompt.trim(); prompt = ""; messages.add(AssistantUiMessage(true, question)); busy = true
                 scope.launch {
                     try {
-                        runCatching { api.askAssistant(question, symbol, draftSide, draftType, draftQuantity, draftPrice) }
-                            .onSuccess { result ->
-                                val time = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(result.dataAsOf))
-                                val meta = "Kaynak: ${result.sources.joinToString()} · ${result.marketMode} · Veri: $time"
-                                messages.add(AssistantUiMessage(false, result.answer, meta))
-                            }
-                            .onFailure { messages.add(AssistantUiMessage(false, it.message ?: "Asistan yanıt veremedi.")) }
+                        if (looksLikeOrderDraftRequest(question)) {
+                            runCatching { api.createAssistantOrderDraft(question) }
+                                .onSuccess { draft -> pendingOrderDraft = draft; messages.add(AssistantUiMessage(false, "Taslağı hazırladım: ${draft.symbol} ${draft.side} LIMIT, ${draft.quantity} @ ${draft.price} ${draft.quoteAsset}. Henüz gönderilmedi; alttaki özeti kontrol edip ayrıca onaylayabilirsin.")) }
+                                .onFailure { messages.add(AssistantUiMessage(false, it.message ?: "Emir taslağı oluşturulamadı.")) }
+                        } else {
+                            runCatching { api.askAssistant(question, symbol, draftSide, draftType, draftQuantity, draftPrice) }
+                                .onSuccess { result ->
+                                    val time = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(result.dataAsOf))
+                                    val meta = "Kaynak: ${result.sources.joinToString()} · ${result.marketMode} · Veri: $time"
+                                    messages.add(AssistantUiMessage(false, result.answer, meta))
+                                }
+                                .onFailure { messages.add(AssistantUiMessage(false, it.message ?: "Asistan yanıt veremedi.")) }
+                        }
                     } finally { busy = false }
                 }
             }, modifier = Modifier.height(54.dp), colors = ButtonDefaults.buttonColors(containerColor = ArgentGold, contentColor = ArgentBg)) {
@@ -1052,6 +1219,33 @@ private fun AssistantTab(
             }
         }
     }
+    if (confirmOrderDraft) AlertDialog(
+        onDismissRequest = { confirmOrderDraft = false; orderConfirmPassword = "" },
+        title = { Text("Emri son kez kontrol et") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                pendingOrderDraft?.let { d -> Text("${d.symbol} · ${d.side} LIMIT\n${d.quantity} adet @ ${d.price} ${d.quoteAsset}\nTahmini tutar: ${d.quoteNotional} ${d.quoteAsset}", color = ArgentSilver) }
+                Text("Bu onay emri ARGENT dahili eşleştirme motoruna gönderir.", color = ArgentMuted)
+                OutlinedTextField(orderConfirmPassword, { orderConfirmPassword = it }, label = { Text("Hesap parolası") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+            }
+        },
+        confirmButton = { TextButton(enabled = orderConfirmPassword.isNotBlank(), onClick = {
+            val draft = pendingOrderDraft ?: return@TextButton
+            confirmOrderDraft = false; busy = true
+            scope.launch { runCatching { api.confirmAssistantOrderDraft(draft.draftId, orderConfirmPassword) }
+                .onSuccess { result -> pendingOrderDraft = null; messages.add(AssistantUiMessage(false, "Emir sonucu: ${result.status} · ${result.filledQuantity} doldu · ${result.remainingQuantity} kaldı.")) }
+                .onFailure { messages.add(AssistantUiMessage(false, it.message ?: "Emir gönderilemedi.")) }
+                .also { orderConfirmPassword = ""; busy = false } }
+        }) { Text("ONAYLA VE GÖNDER", color = ArgentGreen) } },
+        dismissButton = { TextButton(onClick = { confirmOrderDraft = false; orderConfirmPassword = "" }) { Text("VAZGEÇ") } }
+    )
+}
+
+private fun looksLikeOrderDraftRequest(text: String): Boolean {
+    val q = text.lowercase()
+    return ("limit" in q || "limitli" in q) &&
+        ("alış" in q || "alis" in q || "buy" in q || "sat" in q || "sell" in q) &&
+        listOf("usdt", "usd", "try", "tl").any(q::contains)
 }
 
 @Composable

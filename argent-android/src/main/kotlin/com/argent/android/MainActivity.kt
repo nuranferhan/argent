@@ -56,12 +56,14 @@ import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
+import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.tooling.preview.Preview
@@ -71,6 +73,10 @@ import com.argent.terminal.api.ArgentApi
 import com.argent.terminal.api.DepthLevelDto
 import com.argent.terminal.api.HealthDto
 import com.argent.terminal.api.InstrumentDto
+import com.argent.terminal.api.ExternalMarketStatusDto
+import com.argent.terminal.api.ExternalQuoteDto
+import com.argent.terminal.api.MarketNewsDto
+import com.argent.terminal.api.PriceAlertDto
 import com.argent.terminal.api.MeResponse
 import com.argent.terminal.api.OrderBookDto
 import com.argent.terminal.api.OrderDto
@@ -78,7 +84,9 @@ import com.argent.terminal.api.PortfolioDto
 import com.argent.terminal.api.TenantDto
 import com.argent.terminal.api.TenantMemberDto
 import com.argent.terminal.api.TickerDto
+import com.argent.terminal.api.TechnicalAnalysisDto
 import com.argent.terminal.api.TradeDto
+import com.argent.terminal.api.AssistantOrderDraftDto
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
@@ -173,6 +181,7 @@ private fun MainScreen(api: ArgentApi, initialMe: MeResponse, onMeChanged: (MeRe
     var instruments by remember { mutableStateOf(emptyList<InstrumentDto>()) }
     var symbol by remember { mutableStateOf("THYAO") }
     var ticker by remember { mutableStateOf<TickerDto?>(null) }
+    var technicalAnalysis by remember { mutableStateOf<TechnicalAnalysisDto?>(null) }
     var book by remember { mutableStateOf(OrderBookDto(symbol)) }
     var portfolio by remember { mutableStateOf<PortfolioDto?>(null) }
     var orders by remember { mutableStateOf(emptyList<OrderDto>()) }
@@ -193,11 +202,17 @@ private fun MainScreen(api: ArgentApi, initialMe: MeResponse, onMeChanged: (MeRe
         launch { api.tickerFlow().collect { t -> if (t.symbol == symbol) { ticker = t; t.price.toFloatOrNull()?.let { prices.add(it); if (prices.size > 120) prices.removeAt(0) } } } }
     }
     LaunchedEffect(symbol) {
+        technicalAnalysis = null
         prices.clear()
         runCatching { api.history(symbol).forEach { it.price.toFloatOrNull()?.let(prices::add) } }
         launch { api.orderBookFlow(symbol).collect { book = it } }
         while (true) {
-            runCatching { ticker = api.ticker(symbol); book = api.orderBook(symbol); trades = api.publicTrades(symbol) }
+            runCatching {
+                ticker = api.ticker(symbol)
+                book = api.orderBook(symbol)
+                trades = api.publicTrades(symbol)
+                technicalAnalysis = api.technicalAnalysis(symbol)
+            }
             delay(3_000)
         }
     }
@@ -238,7 +253,7 @@ private fun MainScreen(api: ArgentApi, initialMe: MeResponse, onMeChanged: (MeRe
             )
             message?.let { Text(it, color = if (it.contains("hata", true) || it.contains("REJECTED", true)) Red else Gold, modifier = Modifier.padding(horizontal = 12.dp)) }
             when (page) {
-                Page.TRADE -> TradePage(api, instruments, symbol, { symbol = it }, ticker, book, prices, trades, busy,
+                Page.TRADE -> TradePage(api, instruments, symbol, { symbol = it }, ticker, book, technicalAnalysis, prices, trades, busy,
                     onMessage = { message = it }, onBusy = { busy = it }, onRefresh = { portfolio = api.portfolio(); orders = api.orders() },
                     onDraftChange = { side, type, quantity, price -> draftSide = side; draftType = type; draftQuantity = quantity; draftPrice = price })
                 Page.PORTFOLIO -> PortfolioPage(portfolio)
@@ -269,6 +284,9 @@ private fun AssistantScreen(api: ArgentApi, symbol: String, draftSide: String, d
     var busy by remember { mutableStateOf(false) }
     var alerts by remember { mutableStateOf<List<String>>(emptyList()) }
     var alertMetadata by remember { mutableStateOf("") }
+    var pendingOrderDraft by remember { mutableStateOf<AssistantOrderDraftDto?>(null) }
+    var confirmOrderDraft by remember { mutableStateOf(false) }
+    var orderConfirmPassword by remember { mutableStateOf("") }
     LaunchedEffect(Unit) { runCatching { enabled = api.assistantStatus().enabled } }
     LaunchedEffect(symbol) {
         while (true) {
@@ -290,12 +308,12 @@ private fun AssistantScreen(api: ArgentApi, symbol: String, draftSide: String, d
                 Text("Portföy · emirler · $symbol", color = Muted, fontSize = 10.sp)
             }
             Surface(color = Color(0x2234D399), shape = RoundedCornerShape(50)) {
-                Text("SALT OKUNUR", color = Green, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
+                Text("ONAYLI TASLAK", color = Green, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
             }
         }
         Text(
             when (enabled) {
-                true -> "ARGENT verileriyle yanıtlar · Emir veremez, bakiye değiştiremez"
+                true -> "Yanıtlar ve emir taslakları · Emir yalnızca parola ile açık onaydan sonra gönderilir"
                 false -> "Asistan kapalı · Gateway AI anahtarını kontrol et"
                 null -> "Asistan bağlantısı kontrol ediliyor…"
             }, color = Muted, fontSize = 10.sp
@@ -329,23 +347,40 @@ private fun AssistantScreen(api: ArgentApi, symbol: String, draftSide: String, d
                 }
             }
         }
+        pendingOrderDraft?.let { draft ->
+            Surface(color = Panel, shape = RoundedCornerShape(10.dp)) {
+                Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Text("EMİR TASLAĞI · GÖNDERİLMEDİ", color = Gold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                    Text("${draft.symbol} ${if (draft.side == "BUY") "ALIŞ" else "SATIŞ"} LIMIT · ${draft.quantity} @ ${draft.price} ${draft.quoteAsset}", color = Color(0xFFE0E4E8), fontSize = 11.sp)
+                    val quoteTime = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(draft.dataAsOf))
+                    Text("Tahmini tutar ${draft.quoteNotional} ${draft.quoteAsset} · ${draft.source} · veri ${quoteTime}. ${draft.note}", color = Muted, fontSize = 10.sp)
+                    Button(onClick = { confirmOrderDraft = true }, colors = ButtonDefaults.buttonColors(containerColor = Gold, contentColor = Ink)) { Text("ÖZETİ ONAYLA VE PAROLAYLA GÖNDER") }
+                }
+            }
+        }
         Row(verticalAlignment = Alignment.Bottom, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             OutlinedTextField(
                 value = prompt, onValueChange = { prompt = it }, enabled = !busy,
                 placeholder = { Text("ARGENT'e sor…") }, minLines = 1, maxLines = 4,
                 modifier = Modifier.weight(1f),
             )
-            Button(enabled = !busy && prompt.isNotBlank() && enabled != false, onClick = {
+            Button(enabled = !busy && prompt.isNotBlank() && (enabled != false || looksLikeOrderDraftRequest(prompt)), onClick = {
                 val question = prompt.trim(); prompt = ""; messages.add(AssistantUiMessage(true, question)); busy = true
                 scope.launch {
                     try {
-                        runCatching { api.askAssistant(question, symbol, draftSide, draftType, draftQuantity, draftPrice) }
-                            .onSuccess { result ->
-                                val time = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(result.dataAsOf))
-                                val meta = "Kaynak: ${result.sources.joinToString()} · ${result.marketMode} · Veri: $time"
-                                messages.add(AssistantUiMessage(false, cleanAssistantAnswer(result.answer), meta))
-                            }
-                            .onFailure { messages.add(AssistantUiMessage(false, it.message ?: "Asistan yanıt veremedi.")) }
+                        if (looksLikeOrderDraftRequest(question)) {
+                            runCatching { api.createAssistantOrderDraft(question) }
+                                .onSuccess { draft -> pendingOrderDraft = draft; messages.add(AssistantUiMessage(false, "Taslağı hazırladım: ${draft.symbol} ${draft.side} LIMIT, ${draft.quantity} @ ${draft.price} ${draft.quoteAsset}. Henüz gönderilmedi; alttaki özeti kontrol edip ayrıca onaylayabilirsin.")) }
+                                .onFailure { messages.add(AssistantUiMessage(false, it.message ?: "Emir taslağı oluşturulamadı.")) }
+                        } else {
+                            runCatching { api.askAssistant(question, symbol, draftSide, draftType, draftQuantity, draftPrice) }
+                                .onSuccess { result ->
+                                    val time = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(result.dataAsOf))
+                                    val meta = "Kaynak: ${result.sources.joinToString()} · ${result.marketMode} · Veri: $time"
+                                    messages.add(AssistantUiMessage(false, cleanAssistantAnswer(result.answer), meta))
+                                }
+                                .onFailure { messages.add(AssistantUiMessage(false, it.message ?: "Asistan yanıt veremedi.")) }
+                        }
                     } finally { busy = false }
                 }
             }, modifier = Modifier.height(54.dp), colors = ButtonDefaults.buttonColors(containerColor = Gold, contentColor = Ink)) {
@@ -353,6 +388,33 @@ private fun AssistantScreen(api: ArgentApi, symbol: String, draftSide: String, d
             }
         }
     }
+    if (confirmOrderDraft) AlertDialog(
+        onDismissRequest = { confirmOrderDraft = false; orderConfirmPassword = "" },
+        title = { Text("Emri son kez kontrol et") },
+        text = {
+            Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+                pendingOrderDraft?.let { d -> Text("${d.symbol} · ${d.side} LIMIT\n${d.quantity} adet @ ${d.price} ${d.quoteAsset}\nTahmini tutar: ${d.quoteNotional} ${d.quoteAsset}", color = Color(0xFFE0E4E8)) }
+                Text("Bu onay emri ARGENT dahili eşleştirme motoruna gönderir.", color = Muted)
+                OutlinedTextField(orderConfirmPassword, { orderConfirmPassword = it }, label = { Text("Hesap parolası") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
+            }
+        },
+        confirmButton = { TextButton(enabled = orderConfirmPassword.isNotBlank(), onClick = {
+            val draft = pendingOrderDraft ?: return@TextButton
+            confirmOrderDraft = false; busy = true
+            scope.launch { runCatching { api.confirmAssistantOrderDraft(draft.draftId, orderConfirmPassword) }
+                .onSuccess { result -> pendingOrderDraft = null; messages.add(AssistantUiMessage(false, "Emir sonucu: ${result.status} · ${result.filledQuantity} doldu · ${result.remainingQuantity} kaldı.")) }
+                .onFailure { messages.add(AssistantUiMessage(false, it.message ?: "Emir gönderilemedi.")) }
+                .also { orderConfirmPassword = ""; busy = false } }
+        }) { Text("ONAYLA VE GÖNDER", color = Green) } },
+        dismissButton = { TextButton(onClick = { confirmOrderDraft = false; orderConfirmPassword = "" }) { Text("VAZGEÇ") } }
+    )
+}
+
+private fun looksLikeOrderDraftRequest(text: String): Boolean {
+    val q = text.lowercase()
+    return ("limit" in q || "limitli" in q) &&
+        ("alış" in q || "alis" in q || "buy" in q || "sat" in q || "sell" in q) &&
+        listOf("usdt", "usd", "try", "tl").any(q::contains)
 }
 
 private fun cleanAssistantAnswer(raw: String): String {
@@ -452,7 +514,7 @@ private fun assistantBlocks(markdown: String): List<AssistantBlock> {
 
 @Composable
 private fun TradePage(api: ArgentApi, instruments: List<InstrumentDto>, symbol: String, onSymbol: (String) -> Unit,
-                      ticker: TickerDto?, book: OrderBookDto, prices: List<Float>, trades: List<TradeDto>, busy: Boolean,
+                      ticker: TickerDto?, book: OrderBookDto, analysis: TechnicalAnalysisDto?, prices: List<Float>, trades: List<TradeDto>, busy: Boolean,
                       onMessage: (String) -> Unit, onBusy: (Boolean) -> Unit, onRefresh: suspend () -> Unit,
                       onDraftChange: (String, String, String, String) -> Unit) {
     val scope = rememberCoroutineScope()
@@ -503,6 +565,7 @@ private fun TradePage(api: ArgentApi, instruments: List<InstrumentDto>, symbol: 
                 }
             }
         }
+        item { TechnicalAnalysisCard(analysis) }
         item { OrderBookCard(book) { price = it } }
         item {
             Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(16.dp)) {
@@ -513,6 +576,7 @@ private fun TradePage(api: ArgentApi, instruments: List<InstrumentDto>, symbol: 
                 }
             }
         }
+        item { ExternalMarketSection(api, onMessage) }
         item {
             Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(16.dp)) {
                 Column(Modifier.fillMaxWidth().padding(14.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -548,6 +612,114 @@ private fun TradePage(api: ArgentApi, instruments: List<InstrumentDto>, symbol: 
                 }
             }
         }
+    }
+}
+
+@Composable
+private fun ExternalMarketSection(api: ArgentApi, onMessage: (String) -> Unit) {
+    val scope = rememberCoroutineScope()
+    val uriHandler = LocalUriHandler.current
+    val symbols = listOf("AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA")
+    var provider by remember { mutableStateOf<ExternalMarketStatusDto?>(null) }
+    var quotes by remember { mutableStateOf(emptyMap<String, ExternalQuoteDto>()) }
+    var news by remember { mutableStateOf(emptyList<MarketNewsDto>()) }
+    var alerts by remember { mutableStateOf(emptyList<PriceAlertDto>()) }
+    var feedError by remember { mutableStateOf<String?>(null) }
+    var selected by remember { mutableStateOf("AAPL") }
+    var threshold by remember { mutableStateOf("") }
+    var direction by remember { mutableStateOf("ABOVE") }
+    val refresh: suspend () -> Unit = {
+        provider = runCatching { api.externalMarketStatus() }.getOrNull()
+        if (provider?.configured == true) {
+            val quoteResults = symbols.map { s -> runCatching { api.nasdaqQuote(s) } }
+            quotes = quoteResults.mapNotNull { it.getOrNull()?.let { q -> q.symbol to q } }.toMap()
+            feedError = quoteResults.firstNotNullOfOrNull { it.exceptionOrNull()?.message }
+            runCatching { api.marketNews() }.onSuccess { news = it }.onFailure { if (feedError == null) feedError = it.message }
+        }
+        alerts = runCatching { api.priceAlerts() }.getOrDefault(alerts)
+    }
+    LaunchedEffect(Unit) { while (true) { refresh(); delay(60_000) } }
+    Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(16.dp)) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                Column {
+                    Text("NASDAQ · HABER · FİYAT ALARMLARI", color = Gold, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+                    Text(if (provider?.configured == true) "Finnhub · API anahtarı bağlı; erişim sağlayıcı hesabına bağlı" else "Gerçek veri kaynağı yapılandırılmadı", color = Muted, fontSize = 10.sp)
+                }
+                TextButton(onClick = { scope.launch { refresh() } }) { Text("YENİLE", color = Gold, fontSize = 10.sp) }
+            }
+            if (provider?.configured != true) {
+                    Text("FINNHUB_API_KEY eklenince hesabınızın kapsamındaki gerçek Nasdaq referans fiyatları ve haberler açılır. Burada örnek fiyat kullanılmaz.", color = Muted, fontSize = 11.sp, lineHeight = 15.sp)
+            } else {
+                feedError?.let { Text("Gerçek veri alınamadı: $it", color = Red, fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis) }
+                Row(Modifier.horizontalScroll(rememberScrollState()), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
+                    quotes.values.forEach { q ->
+                        Card(Modifier.clickable { selected = q.symbol }, colors = CardDefaults.cardColors(containerColor = if (selected == q.symbol) Gold.copy(alpha = .18f) else Ink)) {
+                            Column(Modifier.padding(8.dp)) {
+                                Text(q.symbol, color = Color(0xFFE0E4E8), fontSize = 10.sp, fontWeight = FontWeight.Bold)
+                                Text("USD ${q.price}", color = Gold, fontSize = 11.sp)
+                                Text("${q.changePercent ?: "—"}%", color = Muted, fontSize = 9.sp)
+                                Text("Finnhub · ${java.text.SimpleDateFormat("HH:mm", Locale.getDefault()).format(java.util.Date(q.timestamp))}", color = Muted, fontSize = 8.sp)
+                            }
+                        }
+                    }
+                }
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(5.dp)) {
+                    Choice("ÜSTÜ", direction == "ABOVE") { direction = "ABOVE" }
+                    Choice("ALTI", direction == "BELOW") { direction = "BELOW" }
+                    Field("USD eşik", threshold, { threshold = it }, KeyboardType.Decimal, modifier = Modifier.weight(1f))
+                    Button(enabled = threshold.toBigDecimalOrNull()?.signum() == 1, onClick = {
+                        scope.launch { runCatching { api.createPriceAlert(selected, direction, threshold); threshold = ""; alerts = api.priceAlerts() }
+                            .onSuccess { onMessage("$selected fiyat alarmı kuruldu") }.onFailure { onMessage("Alarm kurulamadı: ${it.message}") } }
+                    }) { Text("KUR") }
+                }
+                alerts.forEach { alert ->
+                    Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
+                        Text("${alert.symbol} ${if (alert.direction == "ABOVE") "≥" else "≤"} USD ${alert.threshold} · ${if (alert.state == "ACTIVE") "bekliyor" else "tetiklendi @ USD ${alert.triggeredPrice}"}", color = if (alert.state == "TRIGGERED") Green else Muted, fontSize = 10.sp)
+                        TextButton(onClick = { scope.launch { runCatching { api.deletePriceAlert(alert.id); alerts = api.priceAlerts() }.onFailure { onMessage("Alarm silinemedi") } } }) { Text("Sil", color = Red, fontSize = 10.sp) }
+                    }
+                }
+                Text("PİYASA HABERLERİ", color = Gold, fontSize = 11.sp, fontWeight = FontWeight.Bold)
+                news.take(5).forEach { n ->
+                    Column(Modifier.fillMaxWidth().clickable { runCatching { uriHandler.openUri(n.url) } }) {
+                        Text(n.headline, color = Color(0xFFE0E4E8), fontSize = 11.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                        Text("${n.source} · ${n.relatedSymbols.ifBlank { "Piyasa" }} · ${java.text.SimpleDateFormat("dd.MM HH:mm", Locale.getDefault()).format(java.util.Date(n.publishedAt))}", color = Muted, fontSize = 9.sp)
+                    }
+                }
+            }
+        }
+    }
+}
+
+@Composable
+private fun TechnicalAnalysisCard(analysis: TechnicalAnalysisDto?) {
+    val observedAt = analysis?.timestamp?.takeIf { it > 0 }?.let {
+        java.text.SimpleDateFormat("HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(it))
+    } ?: "—"
+    Card(colors = CardDefaults.cardColors(containerColor = Panel), shape = RoundedCornerShape(16.dp)) {
+        Column(Modifier.fillMaxWidth().padding(12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+            Text("TEKNİK GÖRÜNÜM", color = Gold, fontWeight = FontWeight.Bold, fontSize = 12.sp)
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                TechnicalValue("Trend", when (analysis?.trend) { "UPWARD" -> "Yukarı"; "DOWNWARD" -> "Aşağı"; "MIXED" -> "Karışık"; else -> "Veri bekleniyor" })
+                TechnicalValue("RSI 14", analysis?.rsi14 ?: "—")
+                TechnicalValue("SMA 20", analysis?.sma20 ?: "—")
+                TechnicalValue("SMA 50", analysis?.sma50 ?: "—")
+            }
+            Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween) {
+                TechnicalValue("20 örnek değişim", analysis?.change20Pct?.let { "$it%" } ?: "—")
+                TechnicalValue("Son 30 dip / tepe", "${analysis?.support30 ?: "—"} / ${analysis?.resistance30 ?: "—"}")
+                TechnicalValue("Örnek", analysis?.sampleCount?.toString() ?: "0")
+            }
+            Text("Son fiyat gözlemleri · ${analysis?.source ?: "kaynak bekleniyor"} · $observedAt. Sabit aralıklı mum verisi değildir; yatırım tavsiyesi sayılmaz.", color = Muted, fontSize = 9.sp, lineHeight = 12.sp)
+        }
+    }
+}
+
+@Composable
+private fun TechnicalValue(label: String, value: String) {
+    Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+        Text(label, color = Muted, fontSize = 9.sp)
+        Text(value, color = Color(0xFFE0E4E8), fontSize = 10.sp, fontWeight = FontWeight.Medium)
     }
 }
 
@@ -754,8 +926,8 @@ private fun Choice(text: String, selected: Boolean, onClick: () -> Unit) {
 }
 
 @Composable
-private fun Field(label: String, value: String, onValue: (String) -> Unit, keyboard: KeyboardType = KeyboardType.Text, secret: Boolean = false) {
-    OutlinedTextField(value = value, onValueChange = onValue, label = { Text(label) }, modifier = Modifier.fillMaxWidth(), singleLine = true,
+private fun Field(label: String, value: String, onValue: (String) -> Unit, keyboard: KeyboardType = KeyboardType.Text, secret: Boolean = false, modifier: Modifier = Modifier) {
+    OutlinedTextField(value = value, onValueChange = onValue, label = { Text(label) }, modifier = modifier.fillMaxWidth(), singleLine = true,
         keyboardOptions = KeyboardOptions(keyboardType = keyboard), visualTransformation = if (secret) PasswordVisualTransformation() else androidx.compose.ui.text.input.VisualTransformation.None)
 }
 
@@ -822,6 +994,7 @@ private fun TradePagePreview() {
             onSymbol = {},
             ticker = sampleTicker,
             book = sampleBook,
+            analysis = null,
             prices = samplePrices,
             trades = sampleTrades,
             busy = false,

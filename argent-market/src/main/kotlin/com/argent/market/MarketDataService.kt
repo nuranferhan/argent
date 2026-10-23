@@ -25,6 +25,16 @@ import java.util.concurrent.ConcurrentHashMap
 import java.time.Instant
 import java.util.UUID
 import java.util.concurrent.atomic.AtomicBoolean
+import java.net.URI
+import java.net.http.HttpRequest
+import java.net.http.HttpResponse
+import kotlinx.coroutines.withContext
+import kotlinx.serialization.json.jsonArray
+import kotlinx.serialization.json.jsonObject
+import kotlinx.serialization.json.jsonPrimitive
+import kotlinx.serialization.json.contentOrNull
+import java.time.OffsetDateTime
+import java.time.Duration
 
 @Serializable
 data class TickerUpdate(
@@ -41,7 +51,7 @@ data class BistHistoricalRow(val timestamp: Long, val symbol: String, val price:
 @Serializable
 data class BistReplayStatus(val replayId: String, val state: String, val rows: Int, val processed: Int, val error: String? = null)
 
-enum class MarketFeedMode { SIMULATED, BINANCE_PUBLIC }
+enum class MarketFeedMode { SIMULATED, BINANCE_PUBLIC, ISTFIN_BIST }
 
 /** Deterministic, instrument-aware sandbox price process; never a source of executable market prices. */
 internal class StochasticPriceGenerator(
@@ -80,11 +90,13 @@ private data class BinanceTicker(
 
 class MarketDataService(
     private val scope: CoroutineScope = CoroutineScope(Dispatchers.IO + SupervisorJob()),
-    private val feedMode: MarketFeedMode = MarketFeedMode.SIMULATED
+    private val feedMode: MarketFeedMode = MarketFeedMode.BINANCE_PUBLIC,
+    private val istfinApiKey: String? = null
 ) {
     private val log = LoggerFactory.getLogger(MarketDataService::class.java)
     private val json = Json { ignoreUnknownKeys = true }
     private val client = HttpClient(CIO) { install(WebSockets) }
+    private val bistHttp = java.net.http.HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
     private val _tickers = MutableSharedFlow<TickerUpdate>(replay = 32, extraBufferCapacity = 256)
     val tickers: SharedFlow<TickerUpdate> = _tickers
     private val lastPrices = ConcurrentHashMap<String, BigDecimal>()
@@ -97,15 +109,74 @@ class MarketDataService(
     fun start() {
         when (feedMode) {
             MarketFeedMode.SIMULATED -> scope.launch { simulateAllInstruments() }
-            MarketFeedMode.BINANCE_PUBLIC -> {
+            MarketFeedMode.BINANCE_PUBLIC, MarketFeedMode.ISTFIN_BIST -> {
                 Instruments.all.filter { it.assetClass == AssetClass.CRYPTO }.let { crypto ->
                     if (crypto.isNotEmpty()) {
                         scope.launch { connectBinance(crypto.map { it.symbol.lowercase() }) }
                     }
                 }
-                scope.launch {
-                    simulateInstruments(Instruments.all.filter { it.assetClass == AssetClass.EQUITY })
+                if (feedMode == MarketFeedMode.ISTFIN_BIST) {
+                    if (istfinApiKey.isNullOrBlank()) log.warn("ISTFIN_BIST selected but ISTFIN_API_KEY is missing; BIST prices stay unavailable")
+                    else scope.launch { connectIstfinBist() }
                 }
+            }
+        }
+    }
+
+    /** BIST quotes from the configured provider account; requests are batched to conserve quota. */
+    private suspend fun connectIstfinBist() {
+        val symbols = Instruments.all.filter { it.assetClass == AssetClass.EQUITY }.joinToString(",") { it.symbol }
+        var retryMs = 15_000L
+        while (true) {
+            try {
+                val request = HttpRequest.newBuilder(URI("https://api.istfin.com/v1/quotes?symbols=$symbols"))
+                    .timeout(Duration.ofSeconds(12))
+                    .header("Authorization", "Bearer ${istfinApiKey}")
+                    .header("Accept", "application/json")
+                    .GET().build()
+                val response = withContext(Dispatchers.IO) { bistHttp.send(request, HttpResponse.BodyHandlers.ofString()) }
+                if (response.statusCode() == 401 || response.statusCode() == 403) {
+                    log.error("istfin rejected BIST market-data credentials/entitlement (HTTP {})", response.statusCode())
+                    delay(5 * 60_000L)
+                    continue
+                }
+                if (response.statusCode() == 429) {
+                    val retryAfter = response.headers().firstValue("Retry-After").orElse("60").toLongOrNull() ?: 60L
+                    log.warn("istfin quota/rate limit reached; retrying after {} seconds", retryAfter)
+                    delay((retryAfter * 1000).coerceIn(5_000L, 15 * 60_000L))
+                    continue
+                }
+                check(response.statusCode() in 200..299) { "istfin HTTP ${response.statusCode()}" }
+                val rows = json.parseToJsonElement(response.body()).jsonObject["data"]?.jsonArray
+                    ?: error("istfin returned an invalid quotes payload")
+                var published = 0
+                rows.forEach { rowElement ->
+                    val row = rowElement.jsonObject
+                    val symbol = row["symbol"]?.jsonPrimitive?.contentOrNull?.uppercase() ?: return@forEach
+                    if (Instruments.get(symbol)?.assetClass != AssetClass.EQUITY) return@forEach
+                    val price = row["price"]?.jsonPrimitive?.contentOrNull?.toBigDecimalOrNull()
+                        ?.takeIf { it.signum() > 0 } ?: return@forEach
+                    val asOf = row["asOf"]?.jsonPrimitive?.contentOrNull?.let {
+                        runCatching { OffsetDateTime.parse(it).toInstant().toEpochMilli() }.getOrNull()
+                    } ?: System.currentTimeMillis()
+                    publish(TickerUpdate(
+                        symbol = symbol,
+                        price = price.stripTrailingZeros().toPlainString(),
+                        volume24h = row["volume"]?.jsonPrimitive?.contentOrNull,
+                        source = "istfin-bist",
+                        timestamp = asOf
+                    ))
+                    published++
+                }
+                if (published == 0) log.warn("istfin returned no usable quotes for configured BIST symbols")
+                retryMs = 15_000L
+                delay(30_000L)
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (failure: Exception) {
+                log.warn("istfin BIST quote request failed: {}", failure.message)
+                delay(retryMs)
+                retryMs = (retryMs * 2).coerceAtMost(5 * 60_000L)
             }
         }
     }
@@ -297,8 +368,21 @@ class MarketDataService(
         return "CONNECTING"
     }
 
-    private fun isFresh(symbol: String): Boolean =
-        (System.currentTimeMillis() - (lastUpdatedAt[symbol] ?: 0L)) <= MAX_PRICE_AGE_MS
+    fun bistFeedStatus(): String {
+        val equitySymbols = Instruments.all.filter { it.assetClass == AssetClass.EQUITY }.map { it.symbol }
+        if (equitySymbols.isEmpty()) return "UNAVAILABLE"
+        if (equitySymbols.all { isFresh(it) && lastTickers[it]?.source == "argent-sim" }) return "SIMULATED"
+        if (equitySymbols.all { isFresh(it) && lastTickers[it]?.source == "istfin-bist" }) return "DELAYED"
+        if (equitySymbols.any { isFresh(it) && lastTickers[it]?.source == "istfin-bist" }) return "PARTIAL"
+        if (equitySymbols.any { lastTickers[it]?.source == "istfin-bist" }) return "STALE"
+        return if (feedMode == MarketFeedMode.ISTFIN_BIST && istfinApiKey.isNullOrBlank()) "NOT_CONFIGURED" else "UNAVAILABLE"
+    }
+
+    private fun isFresh(symbol: String): Boolean {
+        val quote = lastTickers[symbol]
+        val maxAge = if (quote?.source == "istfin-bist") MAX_BIST_QUOTE_AGE_MS else MAX_PRICE_AGE_MS
+        return (System.currentTimeMillis() - (lastUpdatedAt[symbol] ?: 0L)) <= maxAge
+    }
 
     fun history(symbol: String): List<TickerUpdate> {
         val buf = history[symbol] ?: return emptyList()
@@ -312,6 +396,8 @@ class MarketDataService(
 
     companion object {
         private const val MAX_PRICE_AGE_MS = 15_000L
+        // Provider quotes are refreshed in a 30-second batch and may be delayed by the provider.
+        private const val MAX_BIST_QUOTE_AGE_MS = 5 * 60_000L
         private const val MAX_RETRY_DELAY_MS = 30_000L
         private const val MAX_BIST_CSV_BYTES = 2 * 1024 * 1024
         private const val MAX_BIST_ROWS = 50_000

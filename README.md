@@ -9,61 +9,65 @@ ARGENT, kripto ve çoklu varlık piyasalarında emir yaşam döngüsünü, portf
 ## Mimari ve kullanılan teknolojiler
 
 ```mermaid
-flowchart LR
+flowchart TB
     subgraph Clients[İstemciler]
+        direction LR
         Desktop[ARGENT Terminal<br/>Kotlin · Compose Desktop]
         Android[ARGENT Android<br/>Kotlin · Jetpack Compose]
     end
 
-    subgraph Backend[ARGENT Gateway · Ktor]
-        API[REST API · WebSocket]
+    subgraph Gateway[Gateway · Ktor]
+        direction LR
+        API[REST API<br/>WebSocket]
         Auth[Kimlik doğrulama<br/>JWT · Google OAuth]
-        Assistant[ARGENT AI<br/>Groq yapılandırılırsa]
-        Market[Market ve alarm servisleri]
+        Assistant[ARGENT AI<br/>Groq isteğe bağlı]
+        Market[Piyasa ve alarm servisi]
         Trading[Emir ve risk servisleri]
     end
 
-    subgraph Core[Alan modülleri]
+    subgraph Core[Eşleştirme ve muhasebe]
+        direction LR
         Matching[Matching Core]
+        Risk[Risk kontrolleri]
         Engine[Eşleştirme motoru]
         Ledger[Çift girişli ledger]
-        Risk[Risk kontrolleri]
     end
 
-    subgraph Providers[Harici veri kaynakları]
-        Binance[Binance public stream<br/>Kripto kotasyonları]
-        Finnhub[Finnhub<br/>ABD referans kotasyonu · haber · alarm]
-        Sim[Paper fiyat akışı<br/>BIST ve desteklenmeyen enstrümanlar]
-        Groq[Groq API<br/>İsteğe bağlı LLM]
+    subgraph Providers[Veri sağlayıcıları]
+        direction LR
+        Binance[Binance<br/>Kripto kotasyonları]
+        Finnhub[Finnhub<br/>ABD kotasyonu · haber · alarm]
+        Paper[Paper akışı<br/>BIST ve diğer simüle veriler]
+        Groq[Groq API<br/>LLM]
     end
 
-    subgraph Infrastructure[Çalışma altyapısı · Docker Compose]
-        PostgreSQL[(PostgreSQL<br/>kalıcı veriler ve olaylar)]
-        Redis[(Redis<br/>önbellek ve oturum verileri)]
+    subgraph Runtime[Altyapı · Docker Compose]
+        direction LR
+        PostgreSQL[(PostgreSQL<br/>kalıcı veriler)]
+        Redis[(Redis<br/>önbellek)]
         RabbitMQ[(RabbitMQ<br/>olay iletimi)]
-        Metrics[Prometheus · Grafana<br/>metrik ve gözlemleme]
+        Metrics[Prometheus · Grafana<br/>metrikler]
     end
 
-    Desktop <--> API
-    Android <--> API
+    Desktop --> API
+    Android --> API
     API --> Auth
     API --> Assistant
-    Assistant --> Groq
     API --> Market
     API --> Trading
+    Assistant --> Groq
     Trading --> Risk
-    Trading --> Matching
+    Risk --> Matching
     Matching --> Engine
     Matching --> Ledger
     Binance --> Market
     Finnhub --> Market
-    Sim --> Market
+    Paper --> Market
     Auth --> PostgreSQL
     Trading --> PostgreSQL
-    Matching --> PostgreSQL
+    Ledger --> PostgreSQL
     Market --> Redis
-    Market <--> RabbitMQ
-    Matching <--> RabbitMQ
+    Matching --> RabbitMQ
     API --> Metrics
 ```
 

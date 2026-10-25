@@ -27,7 +27,7 @@ These requirements describe an internal simulated exchange. If the product later
 
 ## Additional work only if real external trading or real funds are added
 
-These items require product, provider or jurisdiction decisions. They are outside the currently selected no-fee internal-exchange scope. Do not enable real customer funds until each item has an owner, implementation, integration evidence and operational runbook.
+These items require product, provider or jurisdiction decisions. They are outside the currently selected paper-trading scope. Do not enable real customer funds until each item has an owner, implementation, integration evidence and operational runbook.
 
 1. **Execution venues**: choose each crypto venue and BIST broker, obtain sandbox and production access, agree symbol mapping/order semantics, and implement venue adapters with reconciliation for acknowledgements, partial fills, rejects, cancel races, outages and duplicate delivery. Binance public market data is not an execution adapter.
 2. **Market data rights**: the optional istfin adapter is wired for BIST quotes and reports `NOT_CONFIGURED` until `ISTFIN_API_KEY` is set. Confirm the provider's current delay, entitlement and display/redistribution rights for the intended deployment before enabling it. The explicit demo mode remains simulated; no provider key or data license is bundled.

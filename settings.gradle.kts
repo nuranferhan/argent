@@ -15,6 +15,7 @@ rootProject.name = "argent"
 include(
     "argent-common",
     "argent-engine",
+    "argent-matching-core",
     "argent-ledger",
     "argent-market",
     "argent-risk",

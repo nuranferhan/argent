@@ -1,10 +1,10 @@
 # Market data and Binance Spot Testnet
 
-ARGENT has separate market-data and execution paths: public Binance crypto quotes, optionally provider-sourced BIST quotes, explicitly simulated demo prices, caller-supplied BIST history replay, internal matching, and orders to Binance Spot Testnet. Market data never implies real-money execution.
+ARGENT has separate market-data and execution paths: Binance public crypto quotes, paper-simulated BIST and additional instruments when no live feed is available, optional provider-sourced BIST quotes, caller-supplied BIST history replay, internal matching, and orders to Binance Spot Testnet. Market data never implies real-money execution.
 
 ## Public crypto prices
 
-The default is `MARKET_DATA_MODE=BINANCE_PUBLIC`: real crypto tickers stream from Binance's public WebSocket without an API key. BIST quotes are unavailable by default because no free BIST API with verified display/redistribution rights has been identified. Borsa İstanbul distributes market data through authorized data vendors; a public webpage or an unofficial scraper is not a substitute for permission to display a feed in ARGENT. The optional istfin adapter requires an API key and paid access; istfin's materials describe delayed data and currently list a subscription, so verify current price, delay, entitlement and display rights before enabling it. Keep the provider key in the ignored local `.env` file or deployment secret store; never commit it. Regular ARGENT orders still use the internal matching engine, not BIST. Set `MARKET_DATA_MODE=SIMULATED` only for clearly labeled demo prices. Nasdaq reference quotes and headlines can be enabled with a Finnhub API key, subject to provider limits and display license. Binance Spot Testnet execution is configured separately with its own Testnet-only credentials.
+The default is `MARKET_DATA_MODE=BINANCE_PUBLIC`: real crypto tickers stream from Binance's public WebSocket without an API key. BIST prices are simulated by default using seeded, labeled paper quotes and a small random walk. This fallback stays active when `ISTFIN_BIST` is selected but its live quotes are missing or stale; fresh provider quotes take precedence. Borsa İstanbul distributes market data through authorized data vendors; a public webpage or an unofficial scraper is not a substitute for permission to display a feed in ARGENT. The optional istfin adapter requires an API key and provider entitlement; verify current price, delay, entitlement and display rights before enabling it. Keep the provider key in the ignored local `.env` file or deployment secret store; never commit it. Regular ARGENT orders still use the internal matching engine, not BIST. `MARKET_DATA_MODE=SIMULATED` selects paper prices for every instrument. Nasdaq reference quotes and headlines can be enabled with a Finnhub API key, subject to provider limits and display license. Binance Spot Testnet execution is configured separately with its own Testnet-only credentials.
 
 For local development, add the key to the ignored root `.env` file and rebuild the gateway. Never paste it into chat or commit it:
 
@@ -49,7 +49,7 @@ All endpoints require the ARGENT admin Bearer token. An exchange rejection (for 
 
 ## BIST history replay
 
-The simulator is opt-in only. The replay API accepts a CSV supplied by the local admin; ARGENT does not download, redistribute, or grant rights to BIST data. Check the data provider's terms before importing or sharing files. Do not include licensed datasets or private data in GitHub.
+Live BIST history replay is opt-in; the default BIST paper-price simulator runs independently. The replay API accepts a CSV supplied by the local admin; ARGENT does not download, redistribute, or grant rights to BIST data. Check the data provider's terms before importing or sharing files. Do not include licensed datasets or private data in GitHub.
 
 Accepted CSV columns, in this order:
 

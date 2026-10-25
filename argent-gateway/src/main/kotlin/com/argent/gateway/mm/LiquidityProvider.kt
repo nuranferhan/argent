@@ -117,7 +117,7 @@ class LiquidityProvider(
         }
         val remaining = orders.findActiveByUser(userId).filter { it.symbol == symbol }
         val instrument = Instruments.require(symbol)
-        val strategyCap = if (assetClass == AssetClass.EQUITY) BigDecimal("25") else BigDecimal("0.15")
+        val strategyCap = if (assetClass != AssetClass.CRYPTO) BigDecimal("25") else BigDecimal("0.15")
         val notionalCap = maxQuoteNotional.divide(last, instrument.qtyScale + 8, RoundingMode.DOWN)
         val lot = BigDecimal(instrument.lotSize)
         val baseQty = strategyCap.min(notionalCap)

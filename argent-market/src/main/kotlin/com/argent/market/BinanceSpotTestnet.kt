@@ -38,6 +38,20 @@ class BinanceSpotTestnet(
     @Volatile private var serverTimeSyncedAtNanos: Long = 0
     val configured: Boolean get() = !apiKey.isNullOrBlank() && !secret.isNullOrBlank()
 
+    suspend fun tickerPrice(rawSymbol: String): BinanceTestnetTickerPrice {
+        val symbol = safeSymbol(rawSymbol)
+        val response = try { http.get("$BASE_URL/api/v3/ticker/price?symbol=$symbol") }
+        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
+        catch (_: Exception) { throw BinanceTestnetException(502, "Could not load the Binance Spot Testnet reference price") }
+        val body = response.bodyAsText()
+        if (response.status != HttpStatusCode.OK) {
+            val message = runCatching { Json.parseToJsonElement(body).jsonObject["msg"]?.jsonPrimitive?.content }.getOrNull()
+            throw BinanceTestnetException(response.status.value, message ?: "Could not load the Binance Spot Testnet reference price")
+        }
+        return runCatching { json.decodeFromString<BinanceTestnetTickerPrice>(body) }
+            .getOrElse { throw BinanceTestnetException(502, "Invalid price response from Binance Spot Testnet") }
+    }
+
     suspend fun placeOrder(request: TestnetOrderRequest): TestnetOrder {
         requireConfigured()
         val symbol = request.symbol.uppercase()
@@ -187,6 +201,9 @@ class BinanceSpotTestnet(
         }
     }
 }
+
+@Serializable
+data class BinanceTestnetTickerPrice(val symbol: String, val price: String)
 
 @Serializable
 private data class BinanceServerTime(val serverTime: Long)

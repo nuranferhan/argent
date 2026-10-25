@@ -8,8 +8,7 @@ application {
 
 dependencies {
     implementation(project(":argent-common"))
-    implementation(project(":argent-engine"))
-    implementation(project(":argent-ledger"))
+    implementation(project(":argent-matching-core"))
     implementation(project(":argent-market"))
     implementation(project(":argent-risk"))
 

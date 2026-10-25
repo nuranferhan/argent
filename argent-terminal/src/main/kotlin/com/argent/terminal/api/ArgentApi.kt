@@ -31,6 +31,9 @@ import kotlinx.serialization.json.Json
 class ArgentApi(var baseUrl: String = "http://127.0.0.1:8080") {
     var token: String? = null
     private var refreshToken: String? = null
+    private val newsImageCache = object : LinkedHashMap<String, ByteArray>(16, 0.75f, true) {
+        override fun removeEldestEntry(eldest: MutableMap.MutableEntry<String, ByteArray>?): Boolean = size > 16
+    }
 
     fun clearSession() {
         token = null
@@ -55,16 +58,26 @@ class ArgentApi(var baseUrl: String = "http://127.0.0.1:8080") {
         install(ContentNegotiation) { json(json) }
         install(WebSockets)
         install(HttpTimeout) {
-            requestTimeoutMillis = 15_000
+            requestTimeoutMillis = 75_000
             connectTimeoutMillis = 5_000
-            socketTimeoutMillis = 30_000
+            socketTimeoutMillis = 75_000
         }
         expectSuccess = false
     }
 
-    suspend fun register(email: String, password: String, name: String): RegisterResponse =
-        post("/api/v1/auth/register", RegisterRequest(email, password, name))
+    suspend fun register(email: String, password: String, name: String): TokenResponse {
+        val tokens: TokenResponse = post("/api/v1/auth/register", RegisterRequest(email, password, name))
+        saveTokens(tokens)
+        return tokens
+    }
 
+    suspend fun googleAuthConfig(): GoogleAuthConfigDto = get("/api/v1/auth/google/config")
+    suspend fun googleNonce(): GoogleNonceDto = get("/api/v1/auth/google/nonce")
+    suspend fun loginWithGoogle(idToken: String, nonce: String): TokenResponse {
+        val tokens: TokenResponse = post("/api/v1/auth/google", GoogleLoginRequestDto(idToken, nonce))
+        saveTokens(tokens)
+        return tokens
+    }
     suspend fun registerFromInvitation(email: String, password: String, name: String, token: String): TokenResponse {
         val tokens: TokenResponse = post("/api/v1/auth/register/invitation", InvitationRegistrationRequest(email, password, name, token))
         saveTokens(tokens)
@@ -111,6 +124,8 @@ class ArgentApi(var baseUrl: String = "http://127.0.0.1:8080") {
     }
     suspend fun marketMakerState(): MarketMakerStateDto = get("/api/v1/admin/market-maker")
     suspend fun binanceSpotTestnetStatus(): BinanceTestnetStatusDto = get("/api/v1/admin/binance-spot-testnet")
+    suspend fun binanceSpotTestnetPrice(symbol: String): BinanceTestnetTickerPriceDto =
+        get("/api/v1/admin/binance-spot-testnet/price?symbol=$symbol")
     suspend fun placeBinanceSpotTestnetOrder(request: BinanceTestnetOrderRequestDto): BinanceTestnetOrderDto =
         post("/api/v1/admin/binance-spot-testnet/orders", request)
     suspend fun binanceSpotTestnetOrder(symbol: String, orderId: Long): BinanceTestnetOrderDto =
@@ -140,6 +155,19 @@ class ArgentApi(var baseUrl: String = "http://127.0.0.1:8080") {
     suspend fun externalMarketStatus(): ExternalMarketStatusDto = get("/api/v1/external-market/status")
     suspend fun nasdaqQuote(symbol: String): ExternalQuoteDto = get("/api/v1/external-market/nasdaq/$symbol")
     suspend fun marketNews(): List<MarketNewsDto> = get("/api/v1/external-market/news?category=general")
+    suspend fun marketNewsImage(url: String): ByteArray? {
+        if (!url.startsWith("https://") || url.length > 2048) return null
+        synchronized(newsImageCache) { newsImageCache[url]?.let { return it } }
+        return runCatching {
+            val encoded = java.net.URLEncoder.encode(url, Charsets.UTF_8)
+            val response = client.get("$baseUrl/api/v1/external-market/news-image?url=$encoded") {
+                token?.let { header("Authorization", "Bearer $it") }
+            }
+            if (!response.status.isSuccess()) return@runCatching null
+            val bytes: ByteArray = response.body()
+            bytes.takeIf { it.size in 1..2_000_000 }?.also { image -> synchronized(newsImageCache) { newsImageCache[url] = image } }
+        }.getOrNull()
+    }
     suspend fun priceAlerts(): List<PriceAlertDto> = get("/api/v1/price-alerts")
     suspend fun createPriceAlert(symbol: String, direction: String, threshold: String): PriceAlertDto =
         post("/api/v1/price-alerts", CreatePriceAlertDto(symbol, direction, threshold))
@@ -167,10 +195,11 @@ class ArgentApi(var baseUrl: String = "http://127.0.0.1:8080") {
         draftSide: String? = null,
         draftType: String? = null,
         draftQuantity: String? = null,
-        draftPrice: String? = null
+        draftPrice: String? = null,
+        language: String = "tr"
     ): AssistantAnswerDto = post(
         "/api/v1/assistant/chat",
-        AssistantQuestionDto(question, symbol, draftSide, draftType, draftQuantity, draftPrice)
+        AssistantQuestionDto(question, symbol, draftSide, draftType, draftQuantity, draftPrice, language)
     )
     suspend fun createAssistantOrderDraft(prompt: String): AssistantOrderDraftDto =
         post("/api/v1/assistant/order-drafts", AssistantOrderDraftRequestDto(prompt))
@@ -311,6 +340,9 @@ class ArgentApi(var baseUrl: String = "http://127.0.0.1:8080") {
 @Serializable data class ErrorBody(val error: String? = null, val reason: String? = null)
 
 @Serializable data class RegisterRequest(val email: String, val password: String, val displayName: String)
+@Serializable data class GoogleAuthConfigDto(val configured: Boolean, val webClientId: String? = null, val desktopClientId: String? = null)
+@Serializable data class GoogleNonceDto(val nonce: String)
+@Serializable data class GoogleLoginRequestDto(val idToken: String, val nonce: String)
 @Serializable data class InvitationRegistrationRequest(val email: String, val password: String, val displayName: String, val token: String)
 @Serializable data class TenantSwitchRequest(val tenantId: String)
 @Serializable data class TenantInviteRequest(val email: String, val role: String)
@@ -328,6 +360,7 @@ class ArgentApi(var baseUrl: String = "http://127.0.0.1:8080") {
     val staleQuoteTtlMs: Long
 )
 @Serializable data class MarketMakerActionDto(val enabled: Boolean, val cancelledOrders: Int = 0)
+@Serializable data class BinanceTestnetTickerPriceDto(val symbol: String, val price: String)
 @Serializable data class BinanceTestnetStatusDto(val configured: Boolean, val environment: String = "SPOT_TESTNET", val usesArgentLedger: Boolean = false)
 @Serializable data class BinanceTestnetOrderRequestDto(
     val symbol: String, val side: String, val type: String, val quantity: String,
@@ -381,7 +414,8 @@ class ArgentApi(var baseUrl: String = "http://127.0.0.1:8080") {
 )
 @Serializable data class MarketNewsDto(
     val id: Long, val headline: String, val summary: String = "", val source: String = "", val url: String,
-    val publishedAt: Long, val relatedSymbols: String = ""
+    val publishedAt: Long, val relatedSymbols: String = "", val imageUrl: String? = null,
+    val translatedHeadline: String? = null
 )
 @Serializable data class CreatePriceAlertDto(val symbol: String, val direction: String, val threshold: String)
 @Serializable data class PriceAlertDto(
@@ -456,7 +490,8 @@ class ArgentApi(var baseUrl: String = "http://127.0.0.1:8080") {
     val draftSide: String? = null,
     val draftType: String? = null,
     val draftQuantity: String? = null,
-    val draftPrice: String? = null
+    val draftPrice: String? = null,
+    val language: String = "tr"
 )
 @Serializable data class AssistantAnswerDto(
     val answer: String,

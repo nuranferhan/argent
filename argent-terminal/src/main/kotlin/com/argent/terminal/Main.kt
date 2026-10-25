@@ -2,6 +2,7 @@ package com.argent.terminal
 
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.foundation.basicMarquee
 import androidx.compose.foundation.border
@@ -19,6 +20,7 @@ import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.heightIn
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.foundation.lazy.LazyRow
@@ -38,7 +40,7 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Surface
 import androidx.compose.material3.Tab
 import androidx.compose.material3.TabRow
-import androidx.compose.material3.Text
+import androidx.compose.material3.Text as MaterialText
 import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.LaunchedEffect
@@ -55,6 +57,9 @@ import androidx.compose.ui.input.pointer.pointerInput
 import androidx.compose.runtime.rememberUpdatedState
 import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.geometry.Size
+import androidx.compose.ui.graphics.ImageBitmap
+import androidx.compose.ui.graphics.toComposeImageBitmap
+import org.jetbrains.skia.Image as SkiaImage
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
@@ -67,6 +72,10 @@ import androidx.compose.ui.text.input.KeyboardType
 import androidx.compose.ui.text.input.PasswordVisualTransformation
 import androidx.compose.ui.res.painterResource
 import androidx.compose.ui.platform.LocalUriHandler
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.material3.Slider
+import androidx.compose.ui.unit.Density
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.compose.ui.window.Window
@@ -94,6 +103,7 @@ import com.argent.terminal.api.MarketNewsDto
 import com.argent.terminal.api.PriceAlertDto
 import com.argent.terminal.api.ExternalMarketStatusDto
 import com.argent.terminal.api.AssistantOrderDraftDto
+import com.argent.terminal.ui.ArgentTheme
 import com.argent.terminal.ui.ArgentBg
 import com.argent.terminal.ui.ArgentBlue
 import com.argent.terminal.ui.ArgentColors
@@ -114,37 +124,97 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.CancellationException
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withContext
 import java.math.BigDecimal
 import java.util.Locale
 import java.math.RoundingMode
 import java.util.UUID
+import java.util.prefs.Preferences
+
+
+private val LocalUiLanguage = androidx.compose.runtime.compositionLocalOf { "tr" }
+
+@Composable
+private fun Text(
+    text: String,
+    modifier: Modifier = Modifier,
+    color: Color = Color.Unspecified,
+    fontSize: androidx.compose.ui.unit.TextUnit = androidx.compose.ui.unit.TextUnit.Unspecified,
+    fontWeight: FontWeight? = null,
+    fontFamily: androidx.compose.ui.text.font.FontFamily? = null,
+    textAlign: TextAlign? = null,
+    lineHeight: androidx.compose.ui.unit.TextUnit = androidx.compose.ui.unit.TextUnit.Unspecified,
+    overflow: TextOverflow = TextOverflow.Clip,
+    softWrap: Boolean = true,
+    maxLines: Int = Int.MAX_VALUE,
+    minLines: Int = 1
+) {
+    MaterialText(
+        com.argent.terminal.api.UiTranslations.translate(text, LocalUiLanguage.current),
+        modifier = modifier, color = color, fontSize = fontSize, fontWeight = fontWeight,
+        fontFamily = fontFamily, textAlign = textAlign, lineHeight = lineHeight,
+        overflow = overflow, softWrap = softWrap, maxLines = maxLines, minLines = minLines
+    )
+}
 
 fun main() = application {
-    Window(
-        icon = painterResource("argent-icon.png"),
-        onCloseRequest = ::exitApplication,
-        title = "ARGENT — Multi-Asset Trading Terminal",
-        state = rememberWindowState(width = 1560.dp, height = 940.dp)
-    ) {
-        MaterialTheme(colorScheme = ArgentColors) {
-            Surface(modifier = Modifier.fillMaxSize(), color = ArgentBg) {
-                App()
-            }
-        }
-    }
+    Window(icon = painterResource("argent-icon.png"), onCloseRequest = ::exitApplication, title = "ARGENT — Paper Trading Platform", state = rememberWindowState(width = 1560.dp, height = 940.dp)) { App() }
 }
 
 @Composable
 private fun App() {
-    val api = remember { ArgentApi() }
-    var me by remember { mutableStateOf<MeResponse?>(null) }
-    if (me == null) {
-        LoginPane(api) { me = it }
-    } else {
-        TradingDesk(api, me!!, onLogout = { me = null }, onMeChanged = { me = it })
-    }
+    val prefs = remember { Preferences.userRoot().node("com/argent/terminal") }
+    var dark by remember { mutableStateOf(prefs.getBoolean("darkTheme", true)) }
+    var scale by remember { mutableStateOf(prefs.getFloat("fontScale", 1f)) }
+    var refresh by remember { mutableStateOf(prefs.getInt("refreshSeconds", 3)) }
+    var marketRefresh by remember { mutableStateOf(prefs.getInt("marketRefreshSeconds", 60).coerceIn(60, 900)) }
+    var language by remember { mutableStateOf(prefs.get("language", "tr").takeIf { it in setOf("tr", "en") } ?: "tr") }
+    var savedLanguage by remember { mutableStateOf(language) }
+    var savedDark by remember { mutableStateOf(dark) }; var savedScale by remember { mutableStateOf(scale) }
+    var savedRefresh by remember { mutableStateOf(refresh) }; var savedMarketRefresh by remember { mutableStateOf(marketRefresh) }
+    val density = androidx.compose.ui.platform.LocalDensity.current
+    ArgentTheme(dark) { CompositionLocalProvider(LocalDensity provides Density(density = density.density, fontScale = scale), LocalUiLanguage provides language) {
+        Surface(Modifier.fillMaxSize(), color = ArgentBg) {
+            val api = remember { ArgentApi() }; var me by remember { mutableStateOf<MeResponse?>(null) }
+            if (me == null) LoginPane(api) { me = it } else TradingDesk(api, me!!, { me = null }, { me = it }, dark, scale, refresh, marketRefresh,
+                onSettingsPreview = { d, s -> dark = d; scale = s },
+                onLanguagePreview = { language = it },
+                onSettingsCancel = { dark = savedDark; scale = savedScale; refresh = savedRefresh; marketRefresh = savedMarketRefresh; language = savedLanguage },
+                onSettingsSave = { d, s, r, mr, lang ->
+                    dark = d; scale = s; refresh = r; marketRefresh = mr; language = lang
+                    savedDark = d; savedScale = s; savedRefresh = r; savedMarketRefresh = mr; savedLanguage = lang
+                    prefs.putBoolean("darkTheme", d); prefs.putFloat("fontScale", s); prefs.putInt("refreshSeconds", r); prefs.putInt("marketRefreshSeconds", mr); prefs.put("language", lang)
+                })
+        }
+    } }
 }
 
+@Composable
+private fun SettingsDialog(me: MeResponse, dark: Boolean, scale: Float, refresh: Int, marketRefresh: Int, language: String, onClose: () -> Unit, onPreview: (Boolean, Float) -> Unit, onLanguagePreview: (String) -> Unit, onCancel: () -> Unit, onSave: (Boolean, Float, Int, Int, String) -> Unit) {
+    var d by remember { mutableStateOf(dark) }; var s by remember { mutableStateOf(scale) }; var r by remember { mutableStateOf(refresh) }; var mr by remember { mutableStateOf(marketRefresh) }; var lang by remember { mutableStateOf(language) }
+    fun cancel() { onCancel(); onClose() }
+    AlertDialog(onDismissRequest = ::cancel, title = { Text("Ayarlar") }, text = { Column(verticalArrangement = Arrangement.spacedBy(7.dp)) {
+        Text("HESAP", color = ArgentGold, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+        Text("${me.displayName} · ${me.email} · ${me.role}", color = ArgentMuted, fontSize = 11.sp)
+        Text("DİL", color = ArgentGold, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+        Row {
+            TextButton(onClick = { lang = "tr"; onLanguagePreview(lang) }) { Text(if (lang == "tr") "✓ Türkçe" else "Türkçe") }
+            TextButton(onClick = { lang = "en"; onLanguagePreview(lang) }) { Text(if (lang == "en") "✓ English" else "English") }
+        }
+        Text("GÖRÜNÜM", color = ArgentGold, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+        Row {
+            TextButton(onClick = { d = true; onPreview(d, s) }) { Text(if (d) "✓ Koyu tema" else "Koyu tema") }
+            TextButton(onClick = { d = false; onPreview(d, s) }) { Text(if (!d) "✓ Açık tema" else "Açık tema") }
+        }
+        Text("Metin boyutu ${(s * 100).toInt()}%"); Slider(value = s, onValueChange = { s = it; onPreview(d, s) }, valueRange = .85f..1.3f)
+        Text("PİYASA VERİSİ", color = ArgentGold, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+        Text("Finnhub kotasyonları ve haberler ekran açıkken otomatik yenilenir.", color = ArgentMuted, fontSize = 10.sp)
+        Row { listOf(60 to "1 dk", 300 to "5 dk", 900 to "15 dk").forEach { (seconds, label) -> TextButton(onClick = { mr = seconds }) { Text(if (mr == seconds) "✓ $label" else label) } } }
+        Text("Genel veri kontrolü: $r sn"); Slider(value = r.toFloat(), onValueChange = { r = it.toInt().coerceAtLeast(1) }, valueRange = 1f..10f, steps = 8)
+        Text("EMİR GÜVENLİĞİ", color = ArgentGold, fontWeight = FontWeight.Bold, fontSize = 11.sp)
+        Text("AI emir taslakları özet ve hesap parolasıyla onaylanır; AI kendi başına emir göndermez.", color = ArgentMuted, fontSize = 10.sp)
+    } }, confirmButton = { TextButton(onClick = { onSave(d, s, r, mr, lang); onClose() }) { Text("Kaydet") } }, dismissButton = { TextButton(onClick = ::cancel) { Text("İptal") } })
+}
 @Composable
 private fun LoginPane(api: ArgentApi, onAuthed: (MeResponse) -> Unit) {
     val scope = rememberCoroutineScope()
@@ -165,8 +235,15 @@ private fun LoginPane(api: ArgentApi, onAuthed: (MeResponse) -> Unit) {
                 .padding(32.dp),
             verticalArrangement = Arrangement.spacedBy(12.dp)
         ) {
-            Text("ARGENT", color = ArgentGold, fontSize = 32.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
-            Text("Multi-Asset Trading & Settlement Platform", color = ArgentMuted, fontSize = 13.sp)
+            Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+                Surface(modifier = Modifier.size(58.dp), shape = RoundedCornerShape(16.dp), color = Color(0xFF101820)) {
+                    Image(painterResource("argent-icon.png"), contentDescription = "ARGENT simgesi", modifier = Modifier.fillMaxSize().padding(6.dp), contentScale = androidx.compose.ui.layout.ContentScale.Fit)
+                }
+                Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
+                    Text("ARGENT", color = ArgentGold, fontSize = 32.sp, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace)
+                    Text("Paper Trading Platform", color = ArgentMuted, fontSize = 13.sp)
+                }
+            }
             Text("ARGENT gateway hesabınla oturum aç veya çalışma alanı davetini kabul et.", color = ArgentMuted, fontSize = 12.sp)
             field("Gateway", host) { host = it }
             field("E-posta", email) { email = it }
@@ -193,10 +270,7 @@ private fun LoginPane(api: ArgentApi, onAuthed: (MeResponse) -> Unit) {
                     scope.launch {
                         try {
                             when (mode) {
-                                "register" -> {
-                                    api.register(email, password, name.ifBlank { email.substringBefore("@") })
-                                    api.login(email, password)
-                                }
+                                "register" -> api.register(email, password, name.ifBlank { email.substringBefore("@") })
                                 "invitation" -> api.registerFromInvitation(
                                     email, password, name.ifBlank { email.substringBefore("@") }, invitationToken.trim()
                                 )
@@ -216,8 +290,19 @@ private fun LoginPane(api: ArgentApi, onAuthed: (MeResponse) -> Unit) {
                 modifier = Modifier.fillMaxWidth().height(46.dp),
                 colors = ButtonDefaults.buttonColors(containerColor = ArgentGold, contentColor = Color(0xFF111111))
             ) { Text(when (mode) { "login" -> "Giriş"; "invitation" -> "Daveti kabul et"; else -> "Kayıt ol ve giriş" }, fontWeight = FontWeight.Bold) }
+            Button(enabled = !busy, onClick = {
+                busy = true; error = null; api.baseUrl = host.trimEnd('/')
+                scope.launch {
+                    try { googleDesktopSignIn(api); onAuthed(api.me()) }
+                    catch (cancelled: CancellationException) { throw cancelled }
+                    catch (failure: Exception) { error = failure.message ?: "Google ile giriş başarısız." }
+                    finally { busy = false }
+                }
+            }, modifier = Modifier.fillMaxWidth().height(42.dp), colors = ButtonDefaults.buttonColors(containerColor = ArgentPanelAlt, contentColor = ArgentSilver)) {
+                Text("Google ile devam et")
+            }
             if (mode != "invitation") TextButton(onClick = { mode = if (mode == "login") "register" else "login" }) {
-                Text(if (mode == "login") "Geliştirme kaydı" else "Giriş ekranına dön", color = ArgentBlue)
+                Text(if (mode == "login") "Hesap oluştur" else "Giriş ekranına dön", color = ArgentBlue)
             }
             TextButton(onClick = { mode = if (mode == "invitation") "login" else "invitation" }) {
                 Text(if (mode == "invitation") "Giriş ekranına dön" else "Davet koduyla katıl", color = ArgentBlue)
@@ -227,7 +312,7 @@ private fun LoginPane(api: ArgentApi, onAuthed: (MeResponse) -> Unit) {
 }
 
 @Composable
-private fun TradingDesk(api: ArgentApi, me: MeResponse, onLogout: () -> Unit, onMeChanged: (MeResponse) -> Unit) {
+private fun TradingDesk(api: ArgentApi, me: MeResponse, onLogout: () -> Unit, onMeChanged: (MeResponse) -> Unit, darkTheme: Boolean, fontScale: Float, refreshSeconds: Int, marketRefreshSeconds: Int, onSettingsPreview: (Boolean, Float) -> Unit, onLanguagePreview: (String) -> Unit, onSettingsCancel: () -> Unit, onSettingsSave: (Boolean, Float, Int, Int, String) -> Unit) {
     val scope = rememberCoroutineScope()
     var instruments by remember { mutableStateOf(listOf<InstrumentDto>()) }
     var symbol by remember { mutableStateOf("THYAO") }
@@ -241,6 +326,7 @@ private fun TradingDesk(api: ArgentApi, me: MeResponse, onLogout: () -> Unit, on
     var blotter by remember { mutableStateOf(listOf<TradeDto>()) }
     var tab by remember { mutableStateOf(0) }
     var bottomDockHeight by remember { mutableStateOf(420.dp) }
+    var settingsOpen by remember { mutableStateOf(false) }
     var side by remember { mutableStateOf("BUY") }
     var type by remember { mutableStateOf("LIMIT") }
     var price by remember { mutableStateOf("") }
@@ -263,7 +349,7 @@ private fun TradingDesk(api: ArgentApi, me: MeResponse, onLogout: () -> Unit, on
             }
         }
     }
-    LaunchedEffect(symbol) {
+    LaunchedEffect(symbol, refreshSeconds) {
         chart.clear()
         technicalAnalysis = null
         runCatching { api.history(symbol).forEach { it.price.toFloatOrNull()?.let(chart::add) } }
@@ -271,7 +357,7 @@ private fun TradingDesk(api: ArgentApi, me: MeResponse, onLogout: () -> Unit, on
         launch {
             while (true) {
                 runCatching { api.technicalAnalysis(symbol) }.onSuccess { technicalAnalysis = it }
-                delay(3_000)
+                delay(refreshSeconds * 1_000L)
             }
         }
     }
@@ -280,7 +366,7 @@ private fun TradingDesk(api: ArgentApi, me: MeResponse, onLogout: () -> Unit, on
         if (price.isNotBlank()) return@LaunchedEffect
         price = if (side == "BUY") book.bestAsk ?: book.bestBid ?: price else book.bestBid ?: book.bestAsk ?: price
     }
-    LaunchedEffect(me) {
+    LaunchedEffect(me, refreshSeconds) {
         while (true) {
             runCatching { portfolio = api.portfolio() }
             runCatching { orders = api.orders() }
@@ -306,7 +392,7 @@ private fun TradingDesk(api: ArgentApi, me: MeResponse, onLogout: () -> Unit, on
                     if (!h.matchingEngine) append(" · ENGINE PAUSED")
                 }
             }.onFailure { health = "GATEWAY'E BAĞLANILAMIYOR · YENİDEN DENENİYOR" }
-            delay(1_000)
+            delay(refreshSeconds * 1_000L)
         }
     }
 
@@ -315,7 +401,8 @@ private fun TradingDesk(api: ArgentApi, me: MeResponse, onLogout: () -> Unit, on
             me, tickers, health, onLogout, api, symbol, scope,
             onFlash = { flash = it },
             onMeChanged = onMeChanged,
-            onWorkspaceClosed = onLogout
+            onWorkspaceClosed = onLogout,
+            onSettings = { settingsOpen = true }
         )
         flash?.let {
             Text(
@@ -373,7 +460,8 @@ private fun TradingDesk(api: ArgentApi, me: MeResponse, onLogout: () -> Unit, on
                 }
             )
         }
-        BottomDock(tab, { tab = it }, bottomDockHeight, { bottomDockHeight = it }, portfolio, orders, fills, blotter, tickers, api, me, symbol, side, type, qty, price, scope) { flash = it }
+        if (settingsOpen) SettingsDialog(me, darkTheme, fontScale, refreshSeconds, marketRefreshSeconds, LocalUiLanguage.current, { settingsOpen = false }, onSettingsPreview, onLanguagePreview, onSettingsCancel, onSettingsSave)
+        BottomDock(tab, { tab = it }, bottomDockHeight, { bottomDockHeight = it }, portfolio, orders, fills, blotter, tickers, api, me, symbol, side, type, qty, price, scope, marketRefreshSeconds) { flash = it }
     }
 }
 
@@ -389,7 +477,8 @@ private fun TopBar(
     scope: kotlinx.coroutines.CoroutineScope,
     onFlash: (String) -> Unit,
     onMeChanged: (MeResponse) -> Unit,
-    onWorkspaceClosed: () -> Unit
+    onWorkspaceClosed: () -> Unit,
+    onSettings: () -> Unit
 ) {
     var workspaceOpen by remember { mutableStateOf(false) }
     var lastTestnetOrder by remember { mutableStateOf<BinanceTestnetOrderDto?>(null) }
@@ -399,22 +488,20 @@ private fun TopBar(
     ) {
         Text("ARGENT", color = ArgentGold, fontWeight = FontWeight.Bold, fontFamily = FontFamily.Monospace, fontSize = 18.sp, maxLines = 1, softWrap = false)
         Spacer(Modifier.width(20.dp))
-        LazyRow(
-            Modifier.weight(1f).heightIn(min = 28.dp),
-            horizontalArrangement = Arrangement.spacedBy(14.dp),
-            verticalAlignment = Alignment.CenterVertically
-        ) {
-            items(tickers.values.sortedBy { it.symbol }.take(8), key = { it.symbol }) { t ->
-                Text(
-                    "${t.symbol} ${compact(t.price)}",
-                    color = ArgentSilver,
-                    fontSize = 12.sp,
-                    fontFamily = FontFamily.Monospace,
-                    maxLines = 1,
-                    softWrap = false
-                )
-            }
-        }
+        val marketTickerText = tickers.values.sortedBy { it.symbol }
+            .joinToString("     •     ") { "${it.symbol} ${compact(it.price)}" }
+        if (marketTickerText.isNotBlank()) {
+            Text(
+                "$marketTickerText     •     $marketTickerText",
+                modifier = Modifier.weight(1f).heightIn(min = 28.dp)
+                    .basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 0),
+                color = ArgentSilver,
+                fontSize = 12.sp,
+                fontFamily = FontFamily.Monospace,
+                maxLines = 1,
+                softWrap = false
+            )
+        } else Spacer(Modifier.weight(1f))
         val ok = health.startsWith("INFRA OK")
         Box(
             Modifier.widthIn(min = 180.dp, max = 260.dp)
@@ -428,7 +515,7 @@ private fun TopBar(
                 fontFamily = FontFamily.Monospace,
                 maxLines = 1,
                 softWrap = false,
-                modifier = Modifier.fillMaxWidth().basicMarquee()
+                modifier = Modifier.fillMaxWidth().basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 0)
             )
         }
         Spacer(Modifier.width(12.dp))
@@ -440,6 +527,7 @@ private fun TopBar(
             softWrap = false,
             overflow = TextOverflow.Ellipsis
         )
+        TextButton(onClick = onSettings) { Text("Ayarlar", color = ArgentGold) }
         TextButton(onClick = { workspaceOpen = true }) { Text("Çalışma alanı", color = ArgentGold) }
         TextButton(onClick = {
             scope.launch {
@@ -475,6 +563,7 @@ private fun WorkspaceDialog(
     testnetOrder: BinanceTestnetOrderDto?,
     onTestnetOrderChanged: (BinanceTestnetOrderDto?) -> Unit
 ) {
+    val language = LocalUiLanguage.current
     var tenants by remember { mutableStateOf(emptyList<TenantDto>()) }
     var members by remember { mutableStateOf(emptyList<TenantMemberDto>()) }
     var inviteEmail by remember { mutableStateOf("") }
@@ -492,12 +581,26 @@ private fun WorkspaceDialog(
     var testnetType by remember { mutableStateOf("LIMIT") }
     var testnetTif by remember { mutableStateOf("GTC") }
     var testnetQuantity by remember { mutableStateOf("0.001") }
-    var testnetPrice by remember { mutableStateOf("30000") }
+    var testnetPrice by remember { mutableStateOf("") }
+    var testnetPriceManual by remember { mutableStateOf(false) }
+    var testnetPriceLoading by remember { mutableStateOf(false) }
     var bistCsv by remember { mutableStateOf("") }
     var bistReplaySpeed by remember { mutableStateOf("1000") }
     var bistReplay by remember { mutableStateOf<BistReplayDto?>(null) }
     val canManage = me.tenantRole == "OWNER" || me.tenantRole == "ADMIN"
 
+    LaunchedEffect(testnetSymbol, testnet?.configured) {
+        if (testnet?.configured == true && testnetSymbol.matches(Regex("[A-Z0-9]{5,20}"))) {
+            while (true) {
+                testnetPriceLoading = true
+                runCatching { api.binanceSpotTestnetPrice(testnetSymbol) }.onSuccess { quote ->
+                    if (!testnetPriceManual) testnetPrice = quote.price
+                }
+                testnetPriceLoading = false
+                delay(30_000)
+            }
+        }
+    }
     LaunchedEffect(me.tenantId) {
         tenants = runCatching { api.tenants() }.getOrDefault(emptyList())
         if (canManage) members = runCatching { api.tenantMembers() }.getOrDefault(emptyList())
@@ -509,7 +612,7 @@ private fun WorkspaceDialog(
         scope.launch {
             error = null
             try { action() } catch (failure: Exception) {
-                error = failure.message ?: "İşlem başarısız"
+                error = com.argent.terminal.api.UiTranslations.translate(failure.message ?: "İşlem başarısız", language)
                 onFlash(error!!)
             }
         }
@@ -548,17 +651,26 @@ private fun WorkspaceDialog(
                     )
                     if (testnet?.configured == true) {
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp)) {
-                            OutlinedTextField(testnetSymbol, { testnetSymbol = it.uppercase() }, label = { Text("Sembol") }, modifier = Modifier.weight(1f), singleLine = true, colors = fieldColors())
+                            OutlinedTextField(testnetSymbol, { testnetSymbol = it.uppercase(); testnetPriceManual = false }, label = { Text("Sembol") }, modifier = Modifier.weight(1f), singleLine = true, colors = fieldColors())
                             TextButton(onClick = { testnetSide = if (testnetSide == "BUY") "SELL" else "BUY" }) { Text(testnetSide, color = if (testnetSide == "BUY") ArgentGreen else ArgentRed) }
                             TextButton(onClick = { testnetType = if (testnetType == "LIMIT") "MARKET" else "LIMIT" }) { Text(testnetType, color = ArgentGold) }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
                             OutlinedTextField(testnetQuantity, { testnetQuantity = it }, label = { Text("Miktar") }, modifier = Modifier.weight(1f), singleLine = true, colors = fieldColors())
-                            if (testnetType == "LIMIT") OutlinedTextField(testnetPrice, { testnetPrice = it }, label = { Text("Fiyat") }, modifier = Modifier.weight(1f), singleLine = true, colors = fieldColors())
+                            if (testnetType == "LIMIT") OutlinedTextField(testnetPrice, { testnetPrice = it; testnetPriceManual = true }, label = { Text(if (testnetPriceLoading) "Testnet fiyatı yükleniyor…" else "Testnet referans fiyatı") }, modifier = Modifier.weight(1f), singleLine = true, colors = fieldColors())
+                            if (testnetType == "LIMIT") TextButton(enabled = !testnetPriceLoading, onClick = {
+                                scope.launch {
+                                    testnetPriceLoading = true
+                                    runCatching { api.binanceSpotTestnetPrice(testnetSymbol) }
+                                        .onSuccess { testnetPrice = it.price; testnetPriceManual = false }
+                                        .onFailure { error = it.message ?: "Testnet fiyatı alınamadı" }
+                                    testnetPriceLoading = false
+                                }
+                            }) { Text(if (testnetPriceLoading) "…" else "Fiyatı yenile", color = ArgentBlue) }
                             if (testnetType == "LIMIT") TextButton(onClick = { testnetTif = when (testnetTif) { "GTC" -> "IOC"; "IOC" -> "FOK"; else -> "GTC" } }) { Text(testnetTif, color = ArgentGold) }
                         }
                         Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
-                            Button(enabled = !testnetSubmitting, onClick = {
+                            Button(enabled = !testnetSubmitting && !testnetPriceLoading && (testnetType != "LIMIT" || (testnetPrice.toBigDecimalOrNull()?.signum() ?: 0) > 0), onClick = {
                                 testnetSubmitting = true
                                 runAction {
                                     try {
@@ -569,7 +681,7 @@ private fun WorkspaceDialog(
                                             clientOrderId = "ag-${java.util.UUID.randomUUID().toString().replace("-", "")}"
                                         ))
                                         onTestnetOrderChanged(result)
-                                        onFlash("Testnet ${result.status} · ${if (result.ledgerSynced) "fill ARGENT defterine işlendi" else "ARGENT defterinde inceleme gerekiyor"} · #${result.orderId}")
+                                        onFlash(if (language == "en") "Testnet ${result.status} · ${if (result.ledgerSynced) "fill posted to ARGENT ledger" else "ARGENT ledger review required"} · #${result.orderId}" else "Testnet ${result.status} · ${if (result.ledgerSynced) "fill ARGENT defterine işlendi" else "ARGENT defterinde inceleme gerekiyor"} · #${result.orderId}")
                                     } finally {
                                         testnetSubmitting = false
                                     }
@@ -974,6 +1086,7 @@ private fun BottomDock(
     draftQuantity: String,
     draftPrice: String,
     scope: kotlinx.coroutines.CoroutineScope,
+    marketRefreshSeconds: Int,
     onFlash: (String) -> Unit
 ) {
     val currentHeight = rememberUpdatedState(height)
@@ -1005,15 +1118,16 @@ private fun BottomDock(
             0 -> PortfolioTab(portfolio, tickers)
             1 -> OrdersTab(orders, api, scope, onFlash)
             2 -> TradesTab(fills, orders)
-            3 -> ExternalMarketsTab(api, scope, onFlash, blotter)
+            3 -> ExternalMarketsTab(api, scope, onFlash, blotter, marketRefreshSeconds)
             else -> AssistantTab(api, selectedSymbol, draftSide, draftType, draftQuantity, draftPrice, scope)
         }
     }
 }
 
 @Composable
-private fun ExternalMarketsTab(api: ArgentApi, scope: kotlinx.coroutines.CoroutineScope, onFlash: (String) -> Unit, trades: List<TradeDto>) {
+private fun ExternalMarketsTab(api: ArgentApi, scope: kotlinx.coroutines.CoroutineScope, onFlash: (String) -> Unit, trades: List<TradeDto>, refreshSeconds: Int) {
     val uriHandler = LocalUriHandler.current
+    val language = LocalUiLanguage.current
     val symbols = listOf("AAPL", "MSFT", "NVDA", "AMZN", "GOOGL", "META", "TSLA")
     var provider by remember { mutableStateOf<ExternalMarketStatusDto?>(null) }
     var quotes by remember { mutableStateOf(emptyMap<String, ExternalQuoteDto>()) }
@@ -1048,7 +1162,7 @@ private fun ExternalMarketsTab(api: ArgentApi, scope: kotlinx.coroutines.Corouti
             loadingExternalData = false
         }
     }
-    LaunchedEffect(Unit) { while (true) { refresh(); kotlinx.coroutines.delay(60_000) } }
+    LaunchedEffect(refreshSeconds) { while (true) { refresh(); kotlinx.coroutines.delay(refreshSeconds * 1_000L) } }
     LazyColumn(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
         item {
             Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
@@ -1056,12 +1170,12 @@ private fun ExternalMarketsTab(api: ArgentApi, scope: kotlinx.coroutines.Corouti
                     Text("NASDAQ · GERÇEK PİYASA REFERANSI", color = ArgentGold, fontWeight = FontWeight.Bold, fontSize = 11.sp)
                     Text(if (provider?.configured == true) "Finnhub · API anahtarı bağlı; veri erişimi sağlayıcı hesabına bağlı" else "Gerçek veri kaynağı henüz yapılandırılmadı", color = ArgentMuted, fontSize = 10.sp)
                 }
-                TextButton(onClick = { scope.launch { refresh() } }) { Text("YENİLE", color = ArgentBlue) }
+                Text("Otomatik · ${refreshSeconds / 60} dk", color = ArgentMuted, fontSize = 9.sp)
             }
             if (loadingExternalData) Text("Finnhub kotasyonları ve haber akışı yükleniyor…", color = ArgentMuted, fontSize = 10.sp)
             if (provider?.configured == false) Text("FINNHUB_API_KEY ekleyince hesabınızın kapsamındaki Nasdaq referans fiyatları ve haber akışı açılır. Demo fiyatı gösterilmiyor.", color = ArgentSilver, fontSize = 10.sp, lineHeight = 14.sp)
             if (provider?.configured == true && feedError != null) Text("Gerçek veri alınamadı: $feedError", color = ArgentRed, fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            if (provider?.configured == true && !loadingExternalData && quotes.isEmpty() && feedError == null) Text("Kotasyon dönmedi. Yenile'ye basıp sağlayıcı erişimini tekrar deneyin.", color = ArgentRed, fontSize = 10.sp)
+            if (provider?.configured == true && !loadingExternalData && quotes.isEmpty() && feedError == null) Text("Kotasyon alınamadı; otomatik olarak yeniden denenecek.", color = ArgentRed, fontSize = 10.sp)
         }
         if (provider?.configured == true) {
             item {
@@ -1087,13 +1201,13 @@ private fun ExternalMarketsTab(api: ArgentApi, scope: kotlinx.coroutines.Corouti
                     OutlinedTextField(threshold, { threshold = it }, Modifier.width(110.dp).height(48.dp), placeholder = { Text("USD eşik", fontSize = 10.sp) }, singleLine = true, textStyle = androidx.compose.ui.text.TextStyle(fontSize = 11.sp), colors = fieldColors())
                     Button(onClick = {
                         scope.launch { runCatching { api.createPriceAlert(selected, direction, threshold); threshold = ""; alerts = api.priceAlerts() }
-                            .onSuccess { onFlash("$selected fiyat alarmı kuruldu") }.onFailure { onFlash("Alarm kurulamadı: ${it.message}") } }
+                            .onSuccess { onFlash(if (language == "en") "$selected price alert created" else "$selected fiyat alarmı kuruldu") }.onFailure { onFlash(if (language == "en") "Could not create alert: ${it.message}" else "Alarm kurulamadı: ${it.message}") } }
                     }, enabled = threshold.toBigDecimalOrNull()?.signum() == 1) { Text("KUR") }
                 }
                 alerts.forEach { alert ->
                     Row(Modifier.fillMaxWidth(), horizontalArrangement = Arrangement.SpaceBetween, verticalAlignment = Alignment.CenterVertically) {
-                        Text("${alert.symbol} ${if (alert.direction == "ABOVE") "≥" else "≤"} USD ${alert.threshold} · ${if (alert.state == "ACTIVE") "bekliyor" else "tetiklendi @ USD ${alert.triggeredPrice}"}", color = if (alert.state == "TRIGGERED") ArgentGreen else ArgentMuted, fontSize = 10.sp)
-                        TextButton(onClick = { scope.launch { runCatching { api.deletePriceAlert(alert.id); alerts = api.priceAlerts() }.onFailure { onFlash("Alarm silinemedi") } } }) { Text("Sil", color = ArgentRed, fontSize = 10.sp) }
+                        Text(if (LocalUiLanguage.current == "en") "${alert.symbol} ${if (alert.direction == "ABOVE") "≥" else "≤"} USD ${alert.threshold} · ${if (alert.state == "ACTIVE") "waiting" else "triggered @ USD ${alert.triggeredPrice}"}" else "${alert.symbol} ${if (alert.direction == "ABOVE") "≥" else "≤"} USD ${alert.threshold} · ${if (alert.state == "ACTIVE") "bekliyor" else "tetiklendi @ USD ${alert.triggeredPrice}"}", color = if (alert.state == "TRIGGERED") ArgentGreen else ArgentMuted, fontSize = 10.sp)
+                        TextButton(onClick = { scope.launch { runCatching { api.deletePriceAlert(alert.id); alerts = api.priceAlerts() }.onFailure { onFlash(if (language == "en") "Could not delete alert" else "Alarm silinemedi") } } }) { Text("Sil", color = ArgentRed, fontSize = 10.sp) }
                     }
                 }
             }
@@ -1101,9 +1215,12 @@ private fun ExternalMarketsTab(api: ArgentApi, scope: kotlinx.coroutines.Corouti
             if (!loadingExternalData && news.isEmpty()) item { Text("Haber alınamadı veya sağlayıcı boş liste döndürdü.", color = if (feedError != null) ArgentRed else ArgentMuted, fontSize = 10.sp) }
             items(news.take(8)) { item ->
                 Surface(color = ArgentPanel, shape = RoundedCornerShape(7.dp)) {
-                    Column(Modifier.fillMaxWidth().clickable { runCatching { uriHandler.openUri(item.url) } }.padding(8.dp), verticalArrangement = Arrangement.spacedBy(3.dp)) {
-                        Text(item.headline, color = ArgentSilver, fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                        Text("${item.source} · ${item.relatedSymbols.ifBlank { "Piyasa" }} · ${java.text.SimpleDateFormat("dd.MM HH:mm", Locale.getDefault()).format(java.util.Date(item.publishedAt))}", color = ArgentMuted, fontSize = 9.sp)
+                    Row(Modifier.fillMaxWidth().clickable { runCatching { uriHandler.openUri(item.url) } }.padding(8.dp), horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+                        NewsThumbnail(api, item.imageUrl, Modifier.width(92.dp).height(60.dp))
+                        Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                            Text(if (LocalUiLanguage.current == "en") item.headline else (item.translatedHeadline ?: item.headline), color = ArgentSilver, fontSize = 10.sp, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                            Text("${item.source} · ${item.relatedSymbols.ifBlank { "Piyasa" }} · ${java.text.SimpleDateFormat("dd.MM HH:mm", Locale.getDefault()).format(java.util.Date(item.publishedAt))}", color = ArgentMuted, fontSize = 9.sp)
+                        }
                     }
                 }
             }
@@ -1113,6 +1230,21 @@ private fun ExternalMarketsTab(api: ArgentApi, scope: kotlinx.coroutines.Corouti
     }
 }
 
+@Composable
+private fun NewsThumbnail(api: ArgentApi, imageUrl: String?, modifier: Modifier = Modifier) {
+    var bitmap by remember(imageUrl) { mutableStateOf<ImageBitmap?>(null) }
+    LaunchedEffect(imageUrl) {
+        bitmap = imageUrl?.let { url ->
+            withContext(kotlinx.coroutines.Dispatchers.IO) {
+                api.marketNewsImage(url)?.let { bytes -> runCatching { SkiaImage.makeFromEncoded(bytes).toComposeImageBitmap() }.getOrNull() }
+            }
+        }
+    }
+    if (bitmap != null) Image(bitmap!!, contentDescription = "Haber görseli", modifier = modifier, contentScale = androidx.compose.ui.layout.ContentScale.Crop)
+    else Box(modifier.background(ArgentPanelAlt, RoundedCornerShape(5.dp)), contentAlignment = Alignment.Center) {
+        Text("ARGENT", color = ArgentGold, fontSize = 9.sp, fontWeight = FontWeight.Bold)
+    }
+}
 private data class AssistantUiMessage(val fromUser: Boolean, val text: String, val metadata: String? = null)
 
 private sealed interface AssistantBlock {
@@ -1132,6 +1264,7 @@ private fun AssistantTab(
     draftPrice: String,
     scope: kotlinx.coroutines.CoroutineScope
 ) {
+    val language = LocalUiLanguage.current
     val messages = remember { androidx.compose.runtime.mutableStateListOf<AssistantUiMessage>() }
     val listState = rememberLazyListState()
     var prompt by remember { mutableStateOf("") }
@@ -1149,7 +1282,7 @@ private fun AssistantTab(
                 Text("Portföy · emirler · $symbol", color = ArgentMuted, fontSize = 10.sp)
             }
             Surface(color = ArgentGreenDim, shape = RoundedCornerShape(50)) {
-                Text("ONAYLI TASLAK", color = ArgentGreen, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
+                Text(if (language == "en") "APPROVED" else "ONAYLI", color = ArgentGreen, fontSize = 9.sp, fontWeight = FontWeight.Bold, modifier = Modifier.padding(horizontal = 9.dp, vertical = 5.dp))
             }
         }
         Text(
@@ -1163,7 +1296,7 @@ private fun AssistantTab(
             Column(Modifier.weight(1f).fillMaxWidth(), verticalArrangement = Arrangement.Center) {
                 Text("Nasıl yardımcı olabilirim?", color = ArgentSilver, fontSize = 15.sp, fontWeight = FontWeight.SemiBold)
                 Text("Hesap verilerin veya seçili piyasa hakkında sor.", color = ArgentMuted, fontSize = 11.sp, modifier = Modifier.padding(top = 3.dp, bottom = 6.dp))
-                listOf("Son 7 gündeki iptal edilen emirlerim", "Risk ve veri akışı uyarılarımı kontrol et", "Demo senaryolarını göster").forEach { suggestion ->
+                (if (language == "en") listOf("My cancelled orders from the last 7 days", "Check my risk and data-feed alerts", "How concentrated is my portfolio?") else listOf("Son 7 gündeki iptal edilen emirlerim", "Risk ve veri akışı uyarılarımı kontrol et", "Portföyümde yoğunlaşma ne durumda?")).forEach { suggestion ->
                     Surface(color = ArgentPanel, shape = RoundedCornerShape(9.dp), modifier = Modifier.fillMaxWidth().padding(vertical = 2.dp).clickable { prompt = suggestion }) {
                         Text(suggestion, color = ArgentSilver, fontSize = 11.sp, modifier = Modifier.padding(horizontal = 10.dp, vertical = 7.dp))
                     }
@@ -1182,9 +1315,9 @@ private fun AssistantTab(
             Surface(color = ArgentPanelAlt, shape = RoundedCornerShape(10.dp)) {
                 Column(Modifier.fillMaxWidth().padding(10.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                     Text("EMİR TASLAĞI · GÖNDERİLMEDİ", color = ArgentGold, fontSize = 10.sp, fontWeight = FontWeight.Bold)
-                    Text("${draft.symbol} ${if (draft.side == "BUY") "ALIŞ" else "SATIŞ"} LIMIT · ${draft.quantity} @ ${draft.price} ${draft.quoteAsset}", color = ArgentSilver, fontSize = 11.sp)
+                    Text(if (language == "en") "${draft.symbol} ${draft.side} LIMIT · ${draft.quantity} @ ${draft.price} ${draft.quoteAsset}" else "${draft.symbol} ${if (draft.side == "BUY") "ALIŞ" else "SATIŞ"} LIMIT · ${draft.quantity} @ ${draft.price} ${draft.quoteAsset}", color = ArgentSilver, fontSize = 11.sp)
                     val quoteTime = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm:ss", java.util.Locale.getDefault()).format(java.util.Date(draft.dataAsOf))
-                    Text("Tahmini tutar ${draft.quoteNotional} ${draft.quoteAsset} · ${draft.source} · veri ${quoteTime}. ${draft.note}", color = ArgentMuted, fontSize = 10.sp)
+                    Text(if (language == "en") "Estimated amount ${draft.quoteNotional} ${draft.quoteAsset} · ${draft.source} · as of ${quoteTime}. ${if (draft.note.contains("anlık")) "The limit price was taken from the current ${if (draft.side == "BUY") "ask" else "bid"} quote; review it before submission." else "The limit price came from your request; review it before submission."}" else "Tahmini tutar ${draft.quoteNotional} ${draft.quoteAsset} · ${draft.source} · veri ${quoteTime}. ${draft.note}", color = ArgentMuted, fontSize = 10.sp)
                     Button(onClick = { confirmOrderDraft = true }, colors = ButtonDefaults.buttonColors(containerColor = ArgentGold, contentColor = ArgentBg)) { Text("ÖZETİ ONAYLA VE PAROLAYLA GÖNDER") }
                 }
             }
@@ -1201,16 +1334,14 @@ private fun AssistantTab(
                     try {
                         if (looksLikeOrderDraftRequest(question)) {
                             runCatching { api.createAssistantOrderDraft(question) }
-                                .onSuccess { draft -> pendingOrderDraft = draft; messages.add(AssistantUiMessage(false, "Taslağı hazırladım: ${draft.symbol} ${draft.side} LIMIT, ${draft.quantity} @ ${draft.price} ${draft.quoteAsset}. Henüz gönderilmedi; alttaki özeti kontrol edip ayrıca onaylayabilirsin.")) }
-                                .onFailure { messages.add(AssistantUiMessage(false, it.message ?: "Emir taslağı oluşturulamadı.")) }
+                                .onSuccess { draft -> pendingOrderDraft = draft; messages.add(AssistantUiMessage(false, if (language == "en") "Draft ready: ${draft.side} LIMIT ${draft.quantity} ${draft.symbol} at ${draft.price} ${draft.quoteAsset}. It has not been submitted; review the summary below and confirm it separately." else "Taslağı hazırladım: ${draft.symbol} ${draft.side} LIMIT, ${draft.quantity} @ ${draft.price} ${draft.quoteAsset}. Henüz gönderilmedi; alttaki özeti kontrol edip ayrıca onaylayabilirsin.")) }
+                                .onFailure { messages.add(AssistantUiMessage(false, com.argent.terminal.api.UiTranslations.translate(it.message ?: if (language == "en") "Could not create the order draft." else "Emir taslağı oluşturulamadı.", language))) }
                         } else {
-                            runCatching { api.askAssistant(question, symbol, draftSide, draftType, draftQuantity, draftPrice) }
+                            runCatching { api.askAssistant(question, symbol, draftSide, draftType, draftQuantity, draftPrice, language) }
                                 .onSuccess { result ->
-                                    val time = java.text.SimpleDateFormat("dd.MM.yyyy HH:mm", java.util.Locale.getDefault()).format(java.util.Date(result.dataAsOf))
-                                    val meta = "Kaynak: ${result.sources.joinToString()} · ${result.marketMode} · Veri: $time"
-                                    messages.add(AssistantUiMessage(false, result.answer, meta))
+                                    messages.add(AssistantUiMessage(false, result.answer))
                                 }
-                                .onFailure { messages.add(AssistantUiMessage(false, it.message ?: "Asistan yanıt veremedi.")) }
+                                .onFailure { messages.add(AssistantUiMessage(false, com.argent.terminal.api.UiTranslations.translate(it.message ?: if (language == "en") "The assistant could not reply." else "Asistan yanıt veremedi.", language))) }
                         }
                     } finally { busy = false }
                 }
@@ -1224,7 +1355,7 @@ private fun AssistantTab(
         title = { Text("Emri son kez kontrol et") },
         text = {
             Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                pendingOrderDraft?.let { d -> Text("${d.symbol} · ${d.side} LIMIT\n${d.quantity} adet @ ${d.price} ${d.quoteAsset}\nTahmini tutar: ${d.quoteNotional} ${d.quoteAsset}", color = ArgentSilver) }
+                pendingOrderDraft?.let { d -> Text(if (language == "en") "${d.symbol} · ${d.side} LIMIT\n${d.quantity} @ ${d.price} ${d.quoteAsset}\nEstimated amount: ${d.quoteNotional} ${d.quoteAsset}" else "${d.symbol} · ${d.side} LIMIT\n${d.quantity} adet @ ${d.price} ${d.quoteAsset}\nTahmini tutar: ${d.quoteNotional} ${d.quoteAsset}", color = ArgentSilver) }
                 Text("Bu onay emri ARGENT dahili eşleştirme motoruna gönderir.", color = ArgentMuted)
                 OutlinedTextField(orderConfirmPassword, { orderConfirmPassword = it }, label = { Text("Hesap parolası") }, singleLine = true, visualTransformation = PasswordVisualTransformation())
             }
@@ -1233,8 +1364,8 @@ private fun AssistantTab(
             val draft = pendingOrderDraft ?: return@TextButton
             confirmOrderDraft = false; busy = true
             scope.launch { runCatching { api.confirmAssistantOrderDraft(draft.draftId, orderConfirmPassword) }
-                .onSuccess { result -> pendingOrderDraft = null; messages.add(AssistantUiMessage(false, "Emir sonucu: ${result.status} · ${result.filledQuantity} doldu · ${result.remainingQuantity} kaldı.")) }
-                .onFailure { messages.add(AssistantUiMessage(false, it.message ?: "Emir gönderilemedi.")) }
+                .onSuccess { result -> pendingOrderDraft = null; messages.add(AssistantUiMessage(false, if (language == "en") "Order result: ${result.status} · ${result.filledQuantity} filled · ${result.remainingQuantity} remaining." else "Emir sonucu: ${result.status} · ${result.filledQuantity} doldu · ${result.remainingQuantity} kaldı.")) }
+                .onFailure { messages.add(AssistantUiMessage(false, com.argent.terminal.api.UiTranslations.translate(it.message ?: if (language == "en") "Could not submit the order." else "Emir gönderilemedi.", language))) }
                 .also { orderConfirmPassword = ""; busy = false } }
         }) { Text("ONAYLA VE GÖNDER", color = ArgentGreen) } },
         dismissButton = { TextButton(onClick = { confirmOrderDraft = false; orderConfirmPassword = "" }) { Text("VAZGEÇ") } }
@@ -1259,7 +1390,6 @@ private fun AssistantMessageBubble(message: AssistantUiMessage) {
             Column(Modifier.padding(10.dp), verticalArrangement = Arrangement.spacedBy(5.dp)) {
                 Text(if (message.fromUser) "SEN" else "ARGENT AI", color = if (message.fromUser) ArgentGold else ArgentGreen, fontSize = 9.sp, fontWeight = FontWeight.Bold)
                 AssistantFormattedAnswer(message.text)
-                message.metadata?.let { Text(it, color = ArgentMuted, fontSize = 9.sp, lineHeight = 12.sp) }
             }
         }
     }
@@ -1402,7 +1532,7 @@ private fun OrdersTab(
                 items(openOrders, key = { it.id }) { o ->
                     Row(Modifier.fillMaxWidth().padding(vertical = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                         Text(
-                            "${o.symbol} ${o.side} ${o.type} ${compact(o.quantity)}@${o.price ?: "MKT"}  ${orderStatusLabel(o.status)}  filled ${compact(o.filledQuantity)}",
+                            "${o.symbol} ${o.side} ${o.type} ${compact(o.quantity)}@${o.price ?: "MKT"}  ${orderStatusLabel(o.status, LocalUiLanguage.current)}  filled ${compact(o.filledQuantity)}",
                             color = ArgentSilver,
                             fontSize = 12.sp,
                             fontFamily = FontFamily.Monospace,
@@ -1435,7 +1565,7 @@ private fun TradesTab(trades: List<TradeDto>, orders: List<OrderDto> = emptyList
         if (orderHistory.isEmpty()) item { Text("Emir geçmişi boş.", color = ArgentMuted, fontSize = 12.sp) }
         items(orderHistory, key = { "order-${it.id}" }) { o ->
             Text(
-                "${o.symbol} ${o.side} ${o.type} · ${orderStatusLabel(o.status)} · dolan ${compact(o.filledQuantity)}/${compact(o.quantity)} · kalan ${compact(o.remainingQuantity)} · ${o.price ?: "MKT"}",
+                if (LocalUiLanguage.current == "en") "${o.symbol} ${o.side} ${o.type} · ${orderStatusLabel(o.status, LocalUiLanguage.current)} · filled ${compact(o.filledQuantity)}/${compact(o.quantity)} · remaining ${compact(o.remainingQuantity)} · ${o.price ?: "MKT"}" else "${o.symbol} ${o.side} ${o.type} · ${orderStatusLabel(o.status, LocalUiLanguage.current)} · dolan ${compact(o.filledQuantity)}/${compact(o.quantity)} · kalan ${compact(o.remainingQuantity)} · ${o.price ?: "MKT"}",
                 color = ArgentSilver, fontSize = 12.sp, fontFamily = FontFamily.Monospace, modifier = Modifier.padding(vertical = 2.dp)
             )
         }
@@ -1452,13 +1582,13 @@ private fun TradesTab(trades: List<TradeDto>, orders: List<OrderDto> = emptyList
     }
 }
 
-private fun orderStatusLabel(status: String): String = when (status.uppercase()) {
-    "ACCEPTED", "NEW", "PENDING" -> "AÇIK"
-    "PARTIALLY_FILLED" -> "KISMEN DOLDU"
-    "FILLED" -> "DOLDU"
-    "CANCELLED", "CANCELED" -> "İPTAL"
-    "REJECTED" -> "REDDEDİLDİ"
-    "EXPIRED" -> "SÜRESİ DOLDU"
+private fun orderStatusLabel(status: String, language: String = "tr"): String = when (status.uppercase()) {
+    "ACCEPTED", "NEW", "PENDING" -> if (language == "en") "OPEN" else "AÇIK"
+    "PARTIALLY_FILLED" -> if (language == "en") "PARTIALLY FILLED" else "KISMEN DOLDU"
+    "FILLED" -> if (language == "en") "FILLED" else "DOLDU"
+    "CANCELLED", "CANCELED" -> if (language == "en") "CANCELLED" else "İPTAL"
+    "REJECTED" -> if (language == "en") "REJECTED" else "REDDEDİLDİ"
+    "EXPIRED" -> if (language == "en") "EXPIRED" else "SÜRESİ DOLDU"
     else -> status
 }
 

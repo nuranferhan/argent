@@ -115,8 +115,10 @@ class MarketDataService(
                         scope.launch { connectBinance(crypto.map { it.symbol.lowercase() }) }
                     }
                 }
+                val simulatedAssets = Instruments.all.filter { it.assetClass != AssetClass.CRYPTO }
+                if (simulatedAssets.isNotEmpty()) scope.launch { simulateInstruments(simulatedAssets) }
                 if (feedMode == MarketFeedMode.ISTFIN_BIST) {
-                    if (istfinApiKey.isNullOrBlank()) log.warn("ISTFIN_BIST selected but ISTFIN_API_KEY is missing; BIST prices stay unavailable")
+                    if (istfinApiKey.isNullOrBlank()) log.warn("ISTFIN_BIST selected without an API key; BIST instruments use the labelled paper-market simulator")
                     else scope.launch { connectIstfinBist() }
                 }
             }
@@ -229,7 +231,14 @@ class MarketDataService(
             "SISE" to BigDecimal("48.15"),
             "BTCUSDT" to BigDecimal("65000"),
             "ETHUSDT" to BigDecimal("3200"),
-            "SOLUSDT" to BigDecimal("150")
+            "SOLUSDT" to BigDecimal("150"),
+            "AAPL" to BigDecimal("347.00"), "MSFT" to BigDecimal("524.00"),
+            "NVDA" to BigDecimal("211.00"), "AMZN" to BigDecimal("248.00"),
+            "GOOGL" to BigDecimal("320.00"), "META" to BigDecimal("643.00"), "TSLA" to BigDecimal("372.00"),
+            "SPY" to BigDecimal("680.00"), "QQQ" to BigDecimal("590.00"), "VTI" to BigDecimal("340.00"),
+            "AFT" to BigDecimal("0.0825"), "TI2" to BigDecimal("4.1570"),
+            "AAPL-20261218-C-350" to BigDecimal("18.50"), "AAPL-20261218-P-330" to BigDecimal("11.25"),
+            "XU030-202612" to BigDecimal("12500.00")
         )
         val prices = instruments.associate { instrument ->
             instrument.symbol to (seeds[instrument.symbol] ?: BigDecimal("100"))
@@ -239,12 +248,22 @@ class MarketDataService(
         }
         instruments.forEach { instrument ->
             val initial = prices.getValue(instrument.symbol)
-            lastPrices[instrument.symbol] = initial
-            lastUpdatedAt[instrument.symbol] = System.currentTimeMillis()
+            val halfSpread = BigDecimal(instrument.tickSize).multiply(BigDecimal("1.5"))
+            val bid = initial.subtract(halfSpread).max(BigDecimal(instrument.tickSize))
+                .setScale(instrument.priceScale, RoundingMode.HALF_UP)
+            val ask = initial.add(halfSpread).setScale(instrument.priceScale, RoundingMode.HALF_UP)
+            // Publish immediately so clients do not show an empty quote before the first random-walk tick.
+            publish(TickerUpdate(
+                symbol = instrument.symbol,
+                price = initial.setScale(instrument.priceScale, RoundingMode.HALF_UP).toPlainString(),
+                bid = bid.toPlainString(),
+                ask = ask.toPlainString(),
+                source = "argent-sim"
+            ))
         }
         while (true) {
             for (instrument in instruments) {
-                if (instrument.assetClass == AssetClass.EQUITY && bistReplayActive.get()) continue
+                if (instrument.assetClass == AssetClass.EQUITY && (bistReplayActive.get() || (lastTickers[instrument.symbol]?.source == "istfin-bist" && isFresh(instrument.symbol)))) continue
                 val symbol = instrument.symbol
                 // Resume the simulator from the most recent replayed/imported equity quote.
                 val last = lastPrices[symbol] ?: prices.getValue(symbol)

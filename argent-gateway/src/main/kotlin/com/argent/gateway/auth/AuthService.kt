@@ -23,6 +23,9 @@ data class TenantAccess(val role: TenantRole, val accountId: String)
 data class TenantMember(val userId: String, val email: String, val displayName: String, val role: TenantRole)
 data class TenantInvitation(val tenantId: String, val email: String, val role: TenantRole, val token: String, val expiresAt: Long)
 
+data class AuthenticatedRegistration(val user: UserAccount, val tokens: AuthService.TokenPair)
+data class FederatedLoginResult(val tokens: AuthService.TokenPair, val accountId: String, val created: Boolean)
+
 data class UserAccount(
     val id: String,
     val email: String,
@@ -88,6 +91,13 @@ class AuthService(
         override val primaryKey = PrimaryKey(tenantId, userId)
     }
 
+    object GoogleIdentities : Table("google_identities") {
+        val subject = varchar("subject", 255)
+        val userId = varchar("user_id", 64).uniqueIndex()
+        val createdAt = long("created_at")
+        override val primaryKey = PrimaryKey(subject)
+    }
+
     object Invitations : Table("tenant_invitations") {
         val id = varchar("id", 64)
         val tenantId = varchar("tenant_id", 64)
@@ -103,7 +113,10 @@ class AuthService(
 
     fun initSchema() {
         transaction(db) {
-            SchemaUtils.createMissingTablesAndColumns(Users, RefreshTokens, Tenants, Memberships, TenantAccounts, Invitations)
+            SchemaUtils.createMissingTablesAndColumns(Users, RefreshTokens, Tenants, Memberships, TenantAccounts, Invitations, GoogleIdentities)
+            if (Tenants.selectAll().where { Tenants.id eq PUBLIC_TENANT_ID }.empty()) {
+                Tenants.insert { it[id] = PUBLIC_TENANT_ID; it[name] = PUBLIC_TENANT_NAME; it[active] = true; it[createdAt] = System.currentTimeMillis() }
+            }
             // Additive migration: old refresh tokens have no tenant binding until next rotation.
             runCatching { exec("ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64)") }
             // Existing users are isolated into individual workspaces; no cross-user data is exposed by backfill.
@@ -185,6 +198,75 @@ class AuthService(
         }
     }
 
+    /** Public sign-up always creates a least-privilege trader in the shared paper-trading tenant. */
+    fun registerPublic(email: String, password: String, displayName: String): AuthenticatedRegistration {
+        val normalized = email.trim().lowercase()
+        require(normalized.contains("@") && normalized.length in 5..255) { "Invalid email" }
+        require(validNewPasswordInput(password)) { "New passwords must contain at least 12 characters and at most 72 UTF-8 bytes" }
+        require(displayName.isNotBlank() && displayName.length <= 128) { "Invalid display name" }
+        return transaction(db) {
+            require(Users.selectAll().where { Users.email eq normalized }.empty()) { "Email already registered" }
+            val id = UUID.randomUUID().toString()
+            val now = System.currentTimeMillis()
+            Users.insert {
+                it[Users.id] = id; it[Users.email] = normalized
+                it[passwordHash] = BCrypt.hashpw(password, BCrypt.gensalt(12))
+                it[Users.displayName] = displayName.trim(); it[Users.role] = UserRole.USER.name
+                it[active] = true; it[createdAt] = now
+            }
+            Memberships.insert {
+                it[tenantId] = PUBLIC_TENANT_ID; it[userId] = id; it[role] = TenantRole.TRADER.name
+                it[active] = true; it[createdAt] = now
+            }
+            TenantAccounts.insert {
+                it[tenantId] = PUBLIC_TENANT_ID; it[userId] = id; it[accountId] = id; it[createdAt] = now
+            }
+            val user = UserAccount(id, normalized, displayName.trim(), UserRole.USER, now, true, PUBLIC_TENANT_ID)
+            AuthenticatedRegistration(user, issueTokens(id, UserRole.USER, PUBLIC_TENANT_ID))
+        }
+    }
+
+    /** Link only verified Google identities; existing email accounts retain their roles and workspaces. */
+    fun loginWithGoogle(profile: GoogleProfile): FederatedLoginResult = transaction(db) {
+        require(profile.emailVerified && profile.subject.isNotBlank()) { "Google account email must be verified" }
+        val identity = GoogleIdentities.selectAll().where { GoogleIdentities.subject eq profile.subject }.firstOrNull()
+        if (identity != null) {
+            val user = Users.selectAll().where { Users.id eq identity[GoogleIdentities.userId] }.firstOrNull()
+                ?: throw IllegalArgumentException("Google account is not linked to an active ARGENT user")
+            require(user[Users.active]) { "Account disabled" }
+            val tenantId = defaultTenantId(user[Users.id])
+            return@transaction FederatedLoginResult(issueTokens(user[Users.id], UserRole.valueOf(user[Users.role]), tenantId), user[Users.id], false)
+        }
+        val email = profile.email.trim().lowercase()
+        require(email.contains("@") && email.length <= 255) { "Google did not provide a valid email" }
+        val existing = Users.selectAll().where { Users.email eq email }.firstOrNull()
+        if (existing != null) {
+            require(existing[Users.active]) { "Account disabled" }
+            val userId = existing[Users.id]
+            val priorGoogleLink = GoogleIdentities.selectAll().where { GoogleIdentities.userId eq userId }.firstOrNull()
+            require(priorGoogleLink == null) { "Bu ARGENT hesabı başka bir Google hesabına bağlı." }
+            GoogleIdentities.insert {
+                it[subject] = profile.subject
+                it[GoogleIdentities.userId] = userId
+                it[createdAt] = System.currentTimeMillis()
+            }
+            val role = UserRole.valueOf(existing[Users.role])
+            val tenantId = defaultTenantId(userId)
+            return@transaction FederatedLoginResult(issueTokens(userId, role, tenantId), userId, false)
+        }
+        val id = UUID.randomUUID().toString()
+        val now = System.currentTimeMillis()
+        val displayName = profile.name?.take(128)?.ifBlank { null } ?: email.substringBefore('@')
+        Users.insert {
+            it[Users.id] = id; it[Users.email] = email
+            it[passwordHash] = BCrypt.hashpw(UUID.randomUUID().toString(), BCrypt.gensalt(12))
+            it[Users.displayName] = displayName; it[Users.role] = UserRole.USER.name; it[active] = true; it[createdAt] = now
+        }
+        Memberships.insert { it[tenantId] = PUBLIC_TENANT_ID; it[userId] = id; it[role] = TenantRole.TRADER.name; it[active] = true; it[createdAt] = now }
+        TenantAccounts.insert { it[tenantId] = PUBLIC_TENANT_ID; it[userId] = id; it[accountId] = id; it[createdAt] = now }
+        GoogleIdentities.insert { it[subject] = profile.subject; it[userId] = id; it[createdAt] = now }
+        FederatedLoginResult(issueTokens(id, UserRole.USER, PUBLIC_TENANT_ID), id, true)
+    }
     fun login(email: String, password: String): TokenPair {
         if (!validPasswordInput(password)) throw IllegalArgumentException("Invalid credentials")
         val normalized = email.trim().lowercase()
@@ -539,6 +621,8 @@ class AuthService(
             password.toByteArray(Charsets.UTF_8).size in MIN_PASSWORD_BYTES..MAX_PASSWORD_BYTES
 
     companion object {
+        const val PUBLIC_TENANT_ID = "argent-public-paper"
+        const val PUBLIC_TENANT_NAME = "ARGENT Paper Trading"
         private const val MIN_PASSWORD_BYTES = 8
         private const val MIN_NEW_PASSWORD_CHARS = 12
         private const val MAX_PASSWORD_BYTES = 72 // bcrypt only incorporates the first 72 input bytes

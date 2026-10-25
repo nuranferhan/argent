@@ -1,6 +1,7 @@
 package com.argent.gateway.market
 
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.encodeToString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonArray
 import kotlinx.serialization.json.jsonObject
@@ -8,13 +9,19 @@ import kotlinx.serialization.json.jsonPrimitive
 import kotlinx.serialization.json.JsonElement
 import kotlinx.serialization.json.longOrNull
 import kotlinx.serialization.json.contentOrNull
+import kotlinx.serialization.json.put
 import java.net.URI
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
 import java.time.Duration
+import java.time.LocalDate
+import java.time.ZoneOffset
 import java.util.concurrent.ConcurrentHashMap
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
 import kotlinx.coroutines.withContext
 
 @Serializable
@@ -37,8 +44,12 @@ data class MarketNewsItem(
     val source: String,
     val url: String,
     val publishedAt: Long,
-    val relatedSymbols: String = ""
+    val relatedSymbols: String = "",
+    val imageUrl: String? = null,
+    val translatedHeadline: String? = null
 )
+
+data class ExternalMarketImage(val bytes: ByteArray, val contentType: String)
 
 @Serializable
 data class ExternalMarketStatus(
@@ -59,11 +70,23 @@ data class PriceAlertResponse(
 fun PriceAlert.toResponse() = PriceAlertResponse(id, symbol, direction, threshold, state, createdAt, triggeredAt, triggeredPrice)
 
 /** Optional, cache-first connector for user-configured personal-use Nasdaq/news access. */
-class ExternalMarketDataService(private val apiKey: String?) {
-    private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(4)).build()
+class ExternalMarketDataService(
+    private val apiKey: String?,
+    private val aiApiKey: String? = System.getenv("ARGENT_AI_API_KEY")?.takeIf(String::isNotBlank),
+    private val aiBaseUrl: String = System.getenv("ARGENT_AI_BASE_URL")?.trimEnd('/') ?: "https://api.groq.com/openai/v1",
+    private val aiModel: String = System.getenv("ARGENT_AI_MODEL") ?: "openai/gpt-oss-20b"
+) {
+    private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(4))
+        .followRedirects(HttpClient.Redirect.NEVER).build()
     private val json = Json { ignoreUnknownKeys = true }
     private val quoteCache = ConcurrentHashMap<String, Pair<Long, ExternalQuote>>()
     @Volatile private var newsCache: Pair<Long, List<MarketNewsItem>>? = null
+    private val knownImageUrls = ConcurrentHashMap.newKeySet<String>()
+    private val imageCache = ConcurrentHashMap<String, Pair<Long, ExternalMarketImage>>()
+    private val headlineTranslationCache = ConcurrentHashMap<String, Pair<Long, String>>()
+    private val translationBudgetLock = Any()
+    @Volatile private var translationBudgetDay = LocalDate.now(ZoneOffset.UTC)
+    @Volatile private var translationBudgetChars = 0
 
     fun status() = ExternalMarketStatus(configured = !apiKey.isNullOrBlank())
 
@@ -103,11 +126,112 @@ class ExternalMarketDataService(private val apiKey: String?) {
                 source = row["source"]?.jsonPrimitive?.contentOrNull.orEmpty(),
                 url = url,
                 publishedAt = (row["datetime"]?.jsonPrimitive?.longOrNull ?: 0L) * 1000,
-                relatedSymbols = row["related"]?.jsonPrimitive?.contentOrNull.orEmpty()
+                relatedSymbols = row["related"]?.jsonPrimitive?.contentOrNull.orEmpty(),
+                imageUrl = row["image"]?.jsonPrimitive?.contentOrNull?.takeIf { it.startsWith("https://") && it.length <= 2048 }
             )
         }.take(40)
-        if (category == "general") newsCache = now to items
-        return items
+        knownImageUrls.clear()
+        knownImageUrls.addAll(items.mapNotNull { it.imageUrl })
+        val translated = translateHeadlines(items)
+        if (category == "general") newsCache = now to translated
+        return translated
+    }
+
+    suspend fun image(rawUrl: String): ExternalMarketImage? {
+        require(rawUrl.length in 1..2048 && rawUrl in knownImageUrls) { "Haber görseli bu akışa ait değil" }
+        imageCache[rawUrl]?.takeIf { System.currentTimeMillis() - it.first < IMAGE_CACHE_MS }?.let { return it.second }
+        val uri = runCatching { URI(rawUrl) }.getOrNull() ?: return null
+        if (uri.scheme != "https" || uri.host.isNullOrBlank() || uri.userInfo != null || uri.port !in listOf(-1, 443)) return null
+        val request = HttpRequest.newBuilder(uri).timeout(Duration.ofSeconds(6)).header("Accept", "image/*").GET().build()
+        val response = try { withContext(Dispatchers.IO) { http.send(request, HttpResponse.BodyHandlers.ofByteArray()) } }
+        catch (_: Exception) { return null }
+        if (response.statusCode() !in 200..299) return null
+        val mime = response.headers().firstValue("Content-Type").orElse("").substringBefore(';').trim().lowercase()
+        if (mime !in ALLOWED_IMAGE_TYPES) return null
+        val bytes = response.body().takeIf { it.size in 1..MAX_IMAGE_BYTES } ?: return null
+        return ExternalMarketImage(bytes, mime).also { imageCache[rawUrl] = System.currentTimeMillis() to it }
+    }
+
+    private suspend fun translateHeadlines(items: List<MarketNewsItem>): List<MarketNewsItem> {
+        val english = items.filter { looksEnglish(it.headline) }.take(8)
+        if (english.isEmpty()) return items
+        val translations = mutableMapOf<Long, String>()
+        if (!aiApiKey.isNullOrBlank()) {
+            runCatching {
+                val messages = kotlinx.serialization.json.buildJsonArray {
+                    add(kotlinx.serialization.json.buildJsonObject {
+                        put("role", kotlinx.serialization.json.JsonPrimitive("system"))
+                        put("content", kotlinx.serialization.json.JsonPrimitive("Translate each financial news headline into natural Turkish. Keep company names, tickers and numbers unchanged. Return only a JSON array of strings in the same order."))
+                    })
+                    add(kotlinx.serialization.json.buildJsonObject {
+                        put("role", kotlinx.serialization.json.JsonPrimitive("user"))
+                        put("content", kotlinx.serialization.json.JsonPrimitive(Json.encodeToString(kotlinx.serialization.builtins.ListSerializer(kotlinx.serialization.serializer<String>()), english.map { it.headline })))
+                    })
+                }
+                val payload = kotlinx.serialization.json.buildJsonObject {
+                    put("model", kotlinx.serialization.json.JsonPrimitive(aiModel))
+                    put("temperature", kotlinx.serialization.json.JsonPrimitive(0))
+                    put("max_tokens", kotlinx.serialization.json.JsonPrimitive((english.size * 48).coerceAtMost(1200)))
+                    put("messages", messages)
+                }
+                val request = HttpRequest.newBuilder(URI(aiBaseUrl.trimEnd('/') + "/chat/completions"))
+                    .timeout(Duration.ofSeconds(12)).header("Authorization", "Bearer $aiApiKey")
+                    .header("Content-Type", "application/json")
+                    .POST(HttpRequest.BodyPublishers.ofString(Json.encodeToString(kotlinx.serialization.json.JsonObject.serializer(), payload))).build()
+                val response = withContext(Dispatchers.IO) { http.send(request, HttpResponse.BodyHandlers.ofString()) }
+                if (response.statusCode() in 200..299) {
+                    val content = Json.parseToJsonElement(response.body()).jsonObject["choices"]?.jsonArray
+                        ?.firstOrNull()?.jsonObject?.get("message")?.jsonObject?.get("content")?.jsonPrimitive?.contentOrNull.orEmpty()
+                    val clean = content.substringAfter("[", "").let { "[" + it.substringBeforeLast("]", "") + "]" }
+                    val result = Json.parseToJsonElement(clean).jsonArray.map { it.jsonPrimitive.content.trim() }
+                    if (result.size == english.size) english.forEachIndexed { index, item ->
+                        result[index].takeIf { it.isNotBlank() && it != item.headline }?.let { translations[item.id] = it.take(300) }
+                    }
+                }
+            }
+        }
+        val missing = english.filter { translations[it.id].isNullOrBlank() }
+        val fallback = coroutineScope {
+            missing.map { item -> async { item.id to translateWithMyMemory(item.headline) } }
+                .awaitAll().mapNotNull { (id, title) -> title?.let { id to it } }.toMap()
+        }
+        translations.putAll(fallback)
+        return items.map { item -> item.copy(translatedHeadline = translations[item.id]?.takeIf { it.isNotBlank() && it != item.headline }) }
+    }
+
+    private suspend fun translateWithMyMemory(headline: String): String? {
+        val now = System.currentTimeMillis()
+        headlineTranslationCache[headline]?.let { (savedAt, value) ->
+            val ttl = if (value.isBlank()) 15 * 60_000L else 7 * 24 * 60 * 60_000L
+            if (now - savedAt < ttl) return value.takeIf(String::isNotBlank)
+        }
+        val chars = headline.toByteArray(Charsets.UTF_8).size
+        val allowed = synchronized(translationBudgetLock) {
+            val today = LocalDate.now(ZoneOffset.UTC)
+            if (today != translationBudgetDay) { translationBudgetDay = today; translationBudgetChars = 0 }
+            if (chars > 500 || translationBudgetChars + chars > 4_500) false
+            else { translationBudgetChars += chars; true }
+        }
+        if (!allowed) return null
+        val request = HttpRequest.newBuilder(URI("https://api.mymemory.translated.net/get?q=${encode(headline)}&langpair=${encode("en|tr")}&mt=1"))
+            .timeout(Duration.ofSeconds(6)).header("Accept", "application/json").GET().build()
+        val translated = runCatching {
+            val response = withContext(Dispatchers.IO) { http.send(request, HttpResponse.BodyHandlers.ofString()) }
+            if (response.statusCode() !in 200..299) return@runCatching null
+            Json.parseToJsonElement(response.body()).jsonObject["responseData"]?.jsonObject?.get("translatedText")
+                ?.jsonPrimitive?.contentOrNull?.replace("&amp;", "&")?.replace("&quot;", "\"")
+                ?.replace("&#39;", "'")?.replace("&lt;", "<")?.replace("&gt;", ">")?.trim()
+                ?.takeIf { it.isNotBlank() && it != headline }
+        }.getOrNull()
+        headlineTranslationCache[headline] = now to (translated ?: "")
+        return translated
+    }
+    private fun looksEnglish(text: String): Boolean {
+        if (text.any { it in "çğıöşüÇĞİÖŞÜ" }) return false
+        val words = Regex("[A-Za-z]{3,}").findAll(text).map { it.value.lowercase() }.toList()
+        if (words.size < 4) return false
+        val englishSignals = setOf("the", "and", "for", "with", "from", "after", "before", "shares", "stock", "market", "company", "reports", "announces", "plans", "quarter", "investors", "earnings", "revenue", "profit", "loss", "deal", "cuts", "raises", "how", "its", "their", "says", "amid", "over", "wall", "street", "funding", "fears", "adjusting", "portfolio", "retail", "more", "than", "years", "ago", "former", "hedge", "manager")
+        return words.count { it in englishSignals } >= 1 || words.size >= 7
     }
 
     private suspend fun get(path: String): JsonElement {
@@ -137,5 +261,8 @@ class ExternalMarketDataService(private val apiKey: String?) {
         private val NEWS_CATEGORIES = setOf("general", "forex", "crypto", "merger")
         private const val QUOTE_CACHE_MS = 20_000L
         private const val NEWS_CACHE_MS = 180_000L
+        private const val IMAGE_CACHE_MS = 900_000L
+        private const val MAX_IMAGE_BYTES = 2_000_000
+        private val ALLOWED_IMAGE_TYPES = setOf("image/jpeg", "image/png", "image/webp", "image/gif")
     }
 }

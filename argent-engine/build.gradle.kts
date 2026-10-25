@@ -1,4 +1,6 @@
 plugins {
+    `java-library`
+    id("maven-publish")
     application
     id("me.champeau.jmh")
 }
@@ -8,7 +10,7 @@ application {
 }
 
 dependencies {
-    implementation(project(":argent-common"))
+    api(project(":argent-common"))
 }
 
 jmh {
@@ -21,3 +23,5 @@ jmh {
     resultFormat.set("JSON")
     resultsFile.set(layout.buildDirectory.file("reports/jmh/results.json"))
 }
+
+publishing { publications { create<MavenPublication>("library") { from(components["java"]) } } }

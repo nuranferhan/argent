@@ -13,6 +13,15 @@ data class InvitationRegistrationRequest(val email: String, val password: String
 data class LoginRequest(val email: String, val password: String)
 
 @Serializable
+data class GoogleLoginRequest(val idToken: String, val nonce: String)
+
+@Serializable
+data class GoogleAuthConfigResponse(val configured: Boolean, val webClientId: String? = null, val desktopClientId: String? = null)
+
+@Serializable
+data class GoogleNonceResponse(val nonce: String)
+
+@Serializable
 data class RefreshRequest(val refreshToken: String)
 
 @Serializable
@@ -179,7 +188,8 @@ data class AssistantQuestionRequest(
     val draftSide: String? = null,
     val draftType: String? = null,
     val draftQuantity: String? = null,
-    val draftPrice: String? = null
+    val draftPrice: String? = null,
+    val language: String = "tr"
 )
 
 @Serializable data class AssistantOrderDraftRequest(val prompt: String)

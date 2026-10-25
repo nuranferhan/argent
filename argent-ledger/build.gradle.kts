@@ -1,3 +1,4 @@
+plugins { id("maven-publish") }
 dependencies {
     implementation(project(":argent-common"))
     implementation("org.postgresql:postgresql:42.7.14")
@@ -6,3 +7,5 @@ dependencies {
     implementation("org.jetbrains.exposed:exposed-jdbc:0.56.0")
     testImplementation("com.h2database:h2:2.3.232")
 }
+
+publishing { publications { create<MavenPublication>("library") { from(components["java"]) } } }

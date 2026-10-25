@@ -39,7 +39,7 @@ class AssistantOrderDraftService {
         val quote = market.lastTicker(instrument.symbol) ?: throw IllegalArgumentException("${instrument.symbol} için güncel fiyat bulunamadı; taslak oluşturulmadı.")
         val now = System.currentTimeMillis()
         require(now - quote.timestamp in 0..30_000) { "Piyasa fiyatı güncel değil; taslak oluşturulmadı." }
-        if (instrument.assetClass == AssetClass.EQUITY && listOf("SIMULATED", "SANDBOX").any { quote.source.contains(it, ignoreCase = true) }) {
+        if (listOf("SIMULATED", "SANDBOX", "ARGENT-SIM").any { quote.source.contains(it, ignoreCase = true) }) {
             throw IllegalArgumentException("${instrument.symbol} için yalnızca simüle fiyat mevcut; bu fiyatla AI emir taslağı hazırlamıyorum.")
         }
         val explicitPrice = Regex("(?:@|FIYAT(?:I)?\\s*)(\\d+(?:\\.\\d+)?)").find(normalized)?.groupValues?.get(1)?.toBigDecimalOrNull()

@@ -21,9 +21,13 @@ data class AppConfig(
     val istfinApiKey: String?,
     val marketMakerPassword: String,
     val binanceSpotTestnetApiKey: String?,
-    val binanceSpotTestnetSecret: String?
+    val binanceSpotTestnetSecret: String?,
+    val publicSignupEnabled: Boolean = true,
+    val googleWebClientId: String? = null,
+    val googleDesktopClientId: String? = null
 ) {
     val isDev: Boolean get() = env == "dev"
+    val googleOAuthClientIds: Set<String> get() = setOfNotNull(googleWebClientId, googleDesktopClientId)
 
     companion object {
         fun load(): AppConfig {
@@ -115,7 +119,11 @@ data class AppConfig(
                     ?.takeIf(String::isNotBlank)
                     ?: java.util.UUID.randomUUID().toString() + "aA1!",
                 binanceSpotTestnetApiKey = binanceTestnetKey,
-                binanceSpotTestnetSecret = binanceTestnetSecret
+                binanceSpotTestnetSecret = binanceTestnetSecret,
+                publicSignupEnabled = (System.getenv("PUBLIC_SIGNUP_ENABLED") ?: "true").toBooleanStrictOrNull()
+                    ?: error("PUBLIC_SIGNUP_ENABLED must be true or false"),
+                googleWebClientId = System.getenv("GOOGLE_WEB_CLIENT_ID")?.takeIf(String::isNotBlank),
+                googleDesktopClientId = System.getenv("GOOGLE_DESKTOP_CLIENT_ID")?.takeIf(String::isNotBlank)
             )
         }
 

@@ -2,6 +2,7 @@ package com.argent.gateway
 
 import com.argent.common.domain.Instruments
 import com.argent.engine.MatchingEngine
+import com.argent.core.ArgentMatchingCore
 import com.argent.engine.OrderBookDepth
 import com.argent.gateway.api.CancelResponse
 import com.argent.gateway.api.BinanceTestnetOrderRequest
@@ -12,6 +13,9 @@ import com.argent.gateway.api.ErrorResponse
 import com.argent.gateway.api.HealthResponse
 import com.argent.gateway.api.InstrumentDto
 import com.argent.gateway.api.LoginRequest
+import com.argent.gateway.api.GoogleLoginRequest
+import com.argent.gateway.api.GoogleAuthConfigResponse
+import com.argent.gateway.api.GoogleNonceResponse
 import com.argent.gateway.api.LedgerReconciliationResponse
 import com.argent.gateway.api.LedgerReconciliationMismatchDto
 import com.argent.gateway.api.MeResponse
@@ -46,6 +50,7 @@ import com.argent.gateway.api.AssistantStatusResponse
 import com.argent.gateway.api.AssistantAlertsResponse
 import com.argent.gateway.api.WithdrawRequest
 import com.argent.gateway.auth.AuthService
+import com.argent.gateway.auth.GoogleIdentityService
 import com.argent.gateway.assistant.ReadOnlyAssistantService
 import com.argent.gateway.assistant.AssistantPortfolioHistoryStore
 import com.argent.gateway.assistant.AssistantDraftOrder
@@ -103,6 +108,7 @@ import io.ktor.server.request.httpMethod
 import io.ktor.server.request.path
 import io.ktor.server.request.receive
 import io.ktor.server.response.respond
+import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondText
 import io.ktor.server.response.respondTextWriter
 import io.ktor.server.routing.delete
@@ -152,10 +158,12 @@ fun main() {
         broker.publish(e)
     }
 
-    val ledger = LedgerService(ds, eventBus).also { it.initSchema() }
+    val core = ArgentMatchingCore(ds, eventBus)
+    val ledger = core.ledger
     val auth = AuthService(database, config.jwtSecret).also { it.initSchema() }
+    val googleIdentity = GoogleIdentityService(config.googleOAuthClientIds)
     val orders = OrderRepository(database).also { it.initSchema() }
-    val engine = MatchingEngine(eventBus, keepRecordedEvents = false)
+    val engine = core.matchingEngine
     val market = MarketDataService(feedMode = config.marketFeedMode, istfinApiKey = config.istfinApiKey).also { it.start() }
     val binanceTestnet = BinanceSpotTestnet(config.binanceSpotTestnetApiKey, config.binanceSpotTestnetSecret)
     val risk = RiskService(ledger)
@@ -201,11 +209,7 @@ fun main() {
         // Replay is read-only with respect to the durable event store. Capture its
         // regenerated fills for settlement recovery without retaining a second
         // unbounded event history in the engine.
-        val recoveryEngine = MatchingEngine(
-            eventBus = replayedEvents::add,
-            keepRecordedEvents = false,
-            rollbackOnMutationFailure = false
-        )
+        val recoveryEngine = core.newMatchingEngine(eventSink = replayedEvents::add, keepRecordedEvents = false, rollbackOnMutationFailure = false)
         val replayStartedAt = System.nanoTime()
         val recoveredOrders = recoveryEngine.replay(history)
         log.info("Replayed {} domain events into {} order snapshots in {} ms", history.size, recoveredOrders.size, (System.nanoTime() - replayStartedAt) / 1_000_000)
@@ -305,6 +309,8 @@ fun main() {
             val (bucket, requestLimit) = when (path) {
                 "/api/v1/auth/login" -> "auth:login" to 10
                 "/api/v1/auth/register" -> "auth:register" to 5
+                "/api/v1/auth/google/nonce" -> "auth:google-nonce" to 10
+                "/api/v1/auth/google" -> "auth:google" to 10
                 "/api/v1/auth/register/invitation" -> "auth:invitation" to 10
                 "/api/v1/auth/refresh" -> "auth:refresh" to 20
                 "/api/v1/assistant/chat" -> "api:assistant" to 20
@@ -405,13 +411,29 @@ fun main() {
                 }
             }
 
+            get("/api/v1/auth/google/config") {
+                call.respond(GoogleAuthConfigResponse(googleIdentity.configured(), config.googleWebClientId, config.googleDesktopClientId))
+            }
+            get("/api/v1/auth/google/nonce") {
+                if (!googleIdentity.configured()) return@get call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse("Google ile giriş için OAuth istemci kimliklerini yapılandırın"))
+                call.respond(GoogleNonceResponse(googleIdentity.issueNonce()))
+            }
             post("/api/v1/auth/register") {
-                if (!config.isDev) {
-                    return@post call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse("Public registration is disabled until email verification and abuse controls are configured"))
-                }
+                if (!config.publicSignupEnabled) return@post call.respond(HttpStatusCode.Forbidden, ErrorResponse("Yeni hesap kaydı şu anda kapalı"))
                 val body = call.receive<RegisterRequest>()
-                val user = auth.register(body.email, body.password, body.displayName)
-                call.respond(HttpStatusCode.Created, RegisterResponse(user.id, user.email, user.displayName))
+                val result = auth.registerPublic(body.email, body.password, body.displayName)
+                seedPublicPaperBalance(ledger, result.user.id)
+                val tokens = result.tokens
+                call.respond(HttpStatusCode.Created, TokenResponse(tokens.accessToken, tokens.refreshToken, tokens.expiresInSeconds))
+            }
+            post("/api/v1/auth/google") {
+                if (!config.publicSignupEnabled) return@post call.respond(HttpStatusCode.Forbidden, ErrorResponse("Yeni hesap kaydı şu anda kapalı"))
+                val body = call.receive<GoogleLoginRequest>()
+                val profile = googleIdentity.verify(body.idToken, body.nonce)
+                val result = auth.loginWithGoogle(profile)
+                if (result.created) seedPublicPaperBalance(ledger, result.accountId)
+                val tokens = result.tokens
+                call.respond(TokenResponse(tokens.accessToken, tokens.refreshToken, tokens.expiresInSeconds))
             }
             post("/api/v1/auth/register/invitation") {
                 val body = call.receive<InvitationRegistrationRequest>()
@@ -421,6 +443,7 @@ fun main() {
             post("/api/v1/auth/login") {
                 val body = call.receive<LoginRequest>()
                 val tokens = auth.login(body.email, body.password)
+                seedBalanceForPublicTrader(ledger, tokens.accessToken)
                 call.respond(TokenResponse(tokens.accessToken, tokens.refreshToken, tokens.expiresInSeconds))
             }
             post("/api/v1/auth/refresh") {
@@ -449,6 +472,13 @@ fun main() {
                         return@get call.respond(status, ErrorResponse(it.message ?: "Haber akışı alınamadı"))
                     }
                     call.respond(news)
+                }
+                get("/api/v1/external-market/news-image") {
+                    val imageUrl = call.request.queryParameters["url"]
+                        ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("Haber görseli gerekli"))
+                    val image = runCatching { externalMarketData.image(imageUrl) }.getOrNull()
+                        ?: return@get call.respond(HttpStatusCode.NotFound, ErrorResponse("Haber görseli alınamadı"))
+                    call.respondBytes(image.bytes, io.ktor.http.ContentType.parse(image.contentType))
                 }
                 get("/api/v1/price-alerts") {
                     val p = call.principal<ArgentPrincipal>()!!
@@ -662,7 +692,8 @@ fun main() {
                             depth = symbol?.let { engine.depth(it, 5) },
                             marketMode = marketMode,
                             dailyBaseline = baseline,
-                            draftOrder = draftOrder
+                            draftOrder = draftOrder,
+                            responseLanguage = request.language
                         )
                     }.getOrElse {
                         log.warn("Read-only ARGENT AI request failed: {}", it.message)
@@ -781,6 +812,16 @@ fun main() {
                     if (p.role != UserRole.ADMIN.name) return@get call.respond(HttpStatusCode.Forbidden, ErrorResponse("Admin only"))
                     call.respond(BinanceTestnetStatusResponse(configured = binanceTestnet.configured, usesArgentLedger = binanceTestnet.configured))
                 }
+                get("/api/v1/admin/binance-spot-testnet/price") {
+                    val p = call.principal<ArgentPrincipal>()!!
+                    if (p.role != UserRole.ADMIN.name) return@get call.respond(HttpStatusCode.Forbidden, ErrorResponse("Admin only"))
+                    val symbol = call.request.queryParameters["symbol"] ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("symbol query parameter is required"))
+                    try { call.respond(binanceTestnet.tickerPrice(symbol)) }
+                    catch (failure: BinanceTestnetException) {
+                        val status = if (failure.upstreamStatus in 400..499) HttpStatusCode.BadRequest else HttpStatusCode.BadGateway
+                        call.respond(status, ErrorResponse(failure.message ?: "Could not load Testnet price"))
+                    }
+                }
                 post("/api/v1/admin/binance-spot-testnet/orders") {
                     val p = call.principal<ArgentPrincipal>()!!
                     if (p.role != UserRole.ADMIN.name) return@post call.respond(HttpStatusCode.Forbidden, ErrorResponse("Admin only"))
@@ -799,7 +840,11 @@ fun main() {
                         call.respond(result)
                     } catch (failure: BinanceTestnetException) {
                         val status = if (failure.upstreamStatus in 400..499) HttpStatusCode.BadRequest else HttpStatusCode.BadGateway
-                        call.respond(status, ErrorResponse(failure.message ?: "Binance Spot Testnet request failed"))
+                        val message = failure.message.orEmpty()
+                        val userMessage = if (message.contains("PERCENT_PRICE_BY_SIDE", ignoreCase = true)) {
+                            "Fiyat Binance Spot Testnet'in izin verdiği aralığın dışında; güncel Testnet fiyatını yenileyip tekrar deneyin. (PERCENT_PRICE_BY_SIDE)"
+                        } else message.ifBlank { "Binance Spot Testnet request failed" }
+                        call.respond(status, ErrorResponse(userMessage))
                     }
                 }
                 get("/api/v1/admin/binance-spot-testnet/orders/{orderId}") {
@@ -880,10 +925,7 @@ fun main() {
                     }
                     val symbol = call.parameters["symbol"]!!.uppercase()
                     val events = eventStore.load(symbol)
-                    val scratch = MatchingEngine(
-                        keepRecordedEvents = false,
-                        rollbackOnMutationFailure = false
-                    )
+                    val scratch = core.newMatchingEngine(eventSink = {}, keepRecordedEvents = false, rollbackOnMutationFailure = false)
                     try {
                         scratch.replay(events)
                         val depth = scratch.depth(symbol)
@@ -962,6 +1004,16 @@ fun main() {
         ds.close()
     })
     server.start(wait = true)
+}
+
+private fun seedBalanceForPublicTrader(ledger: LedgerService, accessToken: String) {
+    val claims = JWT.decode(accessToken)
+    if (claims.getClaim("tenantId").asString() == AuthService.PUBLIC_TENANT_ID) seedPublicPaperBalance(ledger, claims.subject)
+}
+
+private fun seedPublicPaperBalance(ledger: LedgerService, userId: String) {
+    ledger.deposit(userId, "USDT", BigDecimal("25000"), "public-signup-v1")
+    ledger.deposit(userId, "TRY", BigDecimal("500000"), "public-signup-v1")
 }
 
 private fun bootstrap(config: AppConfig, auth: AuthService, ledger: LedgerService) {

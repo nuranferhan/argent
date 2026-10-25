@@ -49,6 +49,11 @@ import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateMapOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.tween
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
@@ -64,7 +69,12 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
+import androidx.compose.ui.graphics.drawscope.clipRect
 import androidx.compose.ui.text.font.FontFamily
+import androidx.compose.ui.text.AnnotatedString
+import androidx.compose.ui.text.TextStyle
+import androidx.compose.ui.text.drawText
+import androidx.compose.ui.text.rememberTextMeasurer
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.text.style.TextAlign
@@ -312,6 +322,33 @@ private fun LoginPane(api: ArgentApi, onAuthed: (MeResponse) -> Unit) {
 }
 
 @Composable
+private fun TickerMarquee(text: String, modifier: Modifier = Modifier) {
+    val density = LocalDensity.current
+    val textMeasurer = rememberTextMeasurer()
+    val style = remember { TextStyle(color = ArgentSilver, fontSize = 12.sp, fontFamily = FontFamily.Monospace) }
+    val layout = remember(text, style, density) {
+        textMeasurer.measure(AnnotatedString(text), style = style, maxLines = 1, softWrap = false)
+    }
+    val contentWidth = layout.size.width.toFloat().coerceAtLeast(1f)
+    val durationMillis = with(density) { (layout.size.width.toDp().value * 28.6f).toInt().coerceAtLeast(5_000) }
+    val transition = rememberInfiniteTransition(label = "market ticker")
+    val progress by transition.animateFloat(
+        initialValue = 0f,
+        targetValue = 1f,
+        animationSpec = infiniteRepeatable(animation = tween(durationMillis, easing = LinearEasing)),
+        label = "market ticker offset"
+    )
+    Canvas(modifier) {
+        val xOffset = -progress * contentWidth
+        val copies = (size.width / contentWidth).toInt() + 2
+        clipRect {
+            repeat(copies) { index ->
+                drawText(layout, topLeft = Offset(xOffset + index * contentWidth, (size.height - layout.size.height) / 2f))
+            }
+        }
+    }
+}
+@Composable
 private fun TradingDesk(api: ArgentApi, me: MeResponse, onLogout: () -> Unit, onMeChanged: (MeResponse) -> Unit, darkTheme: Boolean, fontScale: Float, refreshSeconds: Int, marketRefreshSeconds: Int, onSettingsPreview: (Boolean, Float) -> Unit, onLanguagePreview: (String) -> Unit, onSettingsCancel: () -> Unit, onSettingsSave: (Boolean, Float, Int, Int, String) -> Unit) {
     val scope = rememberCoroutineScope()
     var instruments by remember { mutableStateOf(listOf<InstrumentDto>()) }
@@ -491,15 +528,9 @@ private fun TopBar(
         val marketTickerText = tickers.values.sortedBy { it.symbol }
             .joinToString("     •     ") { "${it.symbol} ${compact(it.price)}" }
         if (marketTickerText.isNotBlank()) {
-            Text(
-                "$marketTickerText     •     $marketTickerText",
-                modifier = Modifier.weight(1f).heightIn(min = 28.dp)
-                    .basicMarquee(iterations = Int.MAX_VALUE, initialDelayMillis = 0),
-                color = ArgentSilver,
-                fontSize = 12.sp,
-                fontFamily = FontFamily.Monospace,
-                maxLines = 1,
-                softWrap = false
+            TickerMarquee(
+                text = "$marketTickerText     •     ",
+                modifier = Modifier.weight(1f).height(28.dp)
             )
         } else Spacer(Modifier.weight(1f))
         val ok = health.startsWith("INFRA OK")
@@ -1634,11 +1665,12 @@ private fun fieldColors() = OutlinedTextFieldDefaults.colors(
 )
 
 private fun compact(raw: String): String = runCatching {
-    BigDecimal(raw).stripTrailingZeros().toPlainString()
+    val value = BigDecimal(raw)
+    (if (value.scale() > 6) value.setScale(6, RoundingMode.HALF_UP) else value).stripTrailingZeros().toPlainString()
 }.getOrElse { raw }
 
 private fun spread(book: OrderBookDto): String {
     val bid = book.bestBid?.let { runCatching { BigDecimal(it) }.getOrNull() } ?: return "—"
     val ask = book.bestAsk?.let { runCatching { BigDecimal(it) }.getOrNull() } ?: return "—"
-    return (ask - bid).stripTrailingZeros().toPlainString()
+    return compact((ask - bid).toPlainString())
 }

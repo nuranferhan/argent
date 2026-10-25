@@ -41,6 +41,9 @@ jobs:
           set -o pipefail
           "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platform-tools" "platforms;android-36" "build-tools;36.0.0"
 
+      - name: Make Gradle wrapper executable
+        run: chmod +x gradlew
+
       - name: Run automated tests
         run: ./gradlew test --no-daemon --max-workers=2
 

@@ -12,41 +12,41 @@ ARGENT, kripto ve çoklu varlık piyasalarında emir yaşam döngüsünü, portf
 flowchart TB
     subgraph Clients[İstemciler]
         direction LR
-        Desktop[ARGENT Terminal<br/>Kotlin · Compose Desktop]
-        Android[ARGENT Android<br/>Kotlin · Jetpack Compose]
+        Desktop[Terminal]
+        Android[Android]
     end
 
     subgraph Gateway[Gateway · Ktor]
         direction LR
-        API[REST API<br/>WebSocket]
-        Auth[Kimlik doğrulama<br/>JWT · Google OAuth]
-        Assistant[ARGENT AI<br/>Groq isteğe bağlı]
-        Market[Piyasa ve alarm servisi]
-        Trading[Emir ve risk servisleri]
+        API[REST · WebSocket]
+        Auth[Kimlik doğrulama]
+        Assistant[ARGENT AI]
+        Market[Piyasa verisi]
+        Trading[Emir servisi]
     end
 
     subgraph Core[Eşleştirme ve muhasebe]
         direction LR
+        Risk[Risk]
         Matching[Matching Core]
-        Risk[Risk kontrolleri]
         Engine[Eşleştirme motoru]
         Ledger[Çift girişli ledger]
     end
 
     subgraph Providers[Veri sağlayıcıları]
         direction LR
-        Binance[Binance<br/>Kripto kotasyonları]
-        Finnhub[Finnhub<br/>ABD kotasyonu · haber · alarm]
-        Paper[Paper akışı<br/>BIST ve diğer simüle veriler]
-        Groq[Groq API<br/>LLM]
+        Binance[Binance · Kripto]
+        Finnhub[Finnhub · ABD]
+        Paper[Paper · BIST]
+        Groq[Groq · LLM]
     end
 
     subgraph Runtime[Altyapı · Docker Compose]
         direction LR
-        PostgreSQL[(PostgreSQL<br/>kalıcı veriler)]
-        Redis[(Redis<br/>önbellek)]
-        RabbitMQ[(RabbitMQ<br/>olay iletimi)]
-        Metrics[Prometheus · Grafana<br/>metrikler]
+        PostgreSQL[(PostgreSQL)]
+        Redis[(Redis)]
+        RabbitMQ[(RabbitMQ)]
+        Metrics[Prometheus · Grafana]
     end
 
     Desktop --> API

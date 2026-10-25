@@ -1,4 +1,4 @@
-# ARGENT — Paper Trading Platform
+# ARGENT - Paper Trading Platform
 
 [![CI](https://github.com/nuranferhan/argent/actions/workflows/ci.yml/badge.svg)](https://github.com/nuranferhan/argent/actions/workflows/ci.yml)
 

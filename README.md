@@ -6,6 +6,85 @@ ARGENT, kripto ve çoklu varlık piyasalarında emir yaşam döngüsünü, portf
 
 **Kotlin · Ktor · PostgreSQL · Redis · RabbitMQ · Compose Desktop · Android · Docker**
 
+## Mimari ve kullanılan teknolojiler
+
+```mermaid
+flowchart LR
+    subgraph Clients[İstemciler]
+        Desktop[ARGENT Terminal<br/>Kotlin · Compose Desktop]
+        Android[ARGENT Android<br/>Kotlin · Jetpack Compose]
+    end
+
+    subgraph Backend[ARGENT Gateway · Ktor]
+        API[REST API · WebSocket]
+        Auth[Kimlik doğrulama<br/>JWT · Google OAuth]
+        Assistant[ARGENT AI<br/>Groq yapılandırılırsa]
+        Market[Market ve alarm servisleri]
+        Trading[Emir ve risk servisleri]
+    end
+
+    subgraph Core[Alan modülleri]
+        Matching[Matching Core]
+        Engine[Eşleştirme motoru]
+        Ledger[Çift girişli ledger]
+        Risk[Risk kontrolleri]
+    end
+
+    subgraph Providers[Harici veri kaynakları]
+        Binance[Binance public stream<br/>Kripto kotasyonları]
+        Finnhub[Finnhub<br/>ABD referans kotasyonu · haber · alarm]
+        Sim[Paper fiyat akışı<br/>BIST ve desteklenmeyen enstrümanlar]
+        Groq[Groq API<br/>İsteğe bağlı LLM]
+    end
+
+    subgraph Infrastructure[Çalışma altyapısı · Docker Compose]
+        PostgreSQL[(PostgreSQL<br/>kalıcı veriler ve olaylar)]
+        Redis[(Redis<br/>önbellek ve oturum verileri)]
+        RabbitMQ[(RabbitMQ<br/>olay iletimi)]
+        Metrics[Prometheus · Grafana<br/>metrik ve gözlemleme]
+    end
+
+    Desktop <--> API
+    Android <--> API
+    API --> Auth
+    API --> Assistant
+    Assistant --> Groq
+    API --> Market
+    API --> Trading
+    Trading --> Risk
+    Trading --> Matching
+    Matching --> Engine
+    Matching --> Ledger
+    Binance --> Market
+    Finnhub --> Market
+    Sim --> Market
+    Auth --> PostgreSQL
+    Trading --> PostgreSQL
+    Matching --> PostgreSQL
+    Market --> Redis
+    Market <--> RabbitMQ
+    Matching <--> RabbitMQ
+    API --> Metrics
+```
+
+| Katman | Teknoloji | Kullanım amacı |
+| --- | --- | --- |
+| İstemciler | Kotlin, Compose Desktop, Jetpack Compose, Ktor Client | Masaüstü ve Android arayüzleri; REST ve WebSocket üzerinden gateway iletişimi |
+| Gateway | Ktor, Kotlin Coroutines, kotlinx.serialization | HTTP API, WebSocket, JSON, kimlik doğrulama ve istemci isteklerinin yönlendirilmesi |
+| Eşleştirme ve muhasebe | `argent-engine`, `argent-ledger`, `argent-matching-core` | Emir defteri/eşleştirme, çift girişli muhasebe ve yeniden kullanılabilir çekirdek API'si |
+| Piyasa ve risk | `argent-market`, `argent-risk` | Piyasa akışlarını birleştirme, teknik göstergeler, alarm kontrolleri ve emir öncesi risk denetimleri |
+| Kalıcılık ve mesajlaşma | PostgreSQL, Exposed, HikariCP, Redis, RabbitMQ | Kalıcı hesap/emir/ledger verileri, bağlantı havuzu, önbellek ve servis olaylarının iletimi |
+| Sağlayıcılar | Binance public stream, isteğe bağlı Finnhub, paper fiyat sağlayıcısı | Kripto akışı; sağlayıcı erişimi varsa ABD referans verisi/haberler; diğer desteklenmeyen enstrümanlar için simülasyon |
+| Gözlemlenebilirlik | Micrometer, Prometheus, Grafana | Gateway metriklerini toplama ve panolarda izleme |
+| Paketleme ve otomasyon | Docker Compose, Gradle, GitHub Actions | Yerel servis ortamı, çok modüllü derleme ve test/derleme CI iş akışı |
+
+**Emir akışı:** İstemci isteği Ktor Gateway'e gelir; risk kontrollerinden sonra ARGENT eşleştirme motoruna iletilir. Eşleşme ve bakiye kayıtları ledger'a yazılır, kalıcı olaylar PostgreSQL'de saklanır ve ilgili olaylar RabbitMQ üzerinden yayınlanır. Bu akış paper trading içindir; gerçek aracı kuruma emir iletmez.
+
+**Veri akışı:** Kripto kotasyonları Binance public akışından alınır. Finnhub yapılandırılmış ve erişilebilir olduğunda Nasdaq referans kotasyonları, haberler ve fiyat alarmı kontrolleri kullanılır; bunlar ARGENT emir defterinin fiyatı değildir. BIST, fonlar ve sağlayıcısı bulunmayan diğer enstrümanlar paper/simüle fiyatla açıkça etiketlenir. Sağlayıcı kotası, erişimi ve gösterim lisansı sağlayıcı koşullarına bağlıdır.
+
+**AI ve güvenlik:** Groq uyumlu sağlayıcı yapılandırılırsa AI, gateway üzerinden portföy/emir/piyasa bağlamını açıklamak için çağrılır. AI tek başına emir göndermez veya bakiye değiştirmez; emir akışı kullanıcı onayı ve gateway kontrolleriyle yürür. Hesap erişimi JWT ve parola tabanlı oturum açmayı destekler; Google OAuth istemci kimlikleri ayrıca yapılandırılır.
+
+
 ## Öne çıkanlar
 
 - Limit/piyasa emirleri, kısmi dolum, iptal ve emir geçmişi

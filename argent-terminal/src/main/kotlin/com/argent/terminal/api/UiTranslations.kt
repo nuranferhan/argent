@@ -163,6 +163,11 @@ object UiTranslations {
     )
 
     fun translate(text: String, language: String): String {
+        val normalizedError = text.lowercase()
+        if (normalizedError.contains("timeout has expired") || normalizedError.contains("timed out") || normalizedError.contains("socket_timeout")) {
+            return if (language == "en") "ARGENT AI is taking longer than expected. Please try again shortly." else "ARGENT AI yanıtı beklenenden uzun sürdü. Lütfen birazdan tekrar dene."
+        }
+
         if (language != "en") return text
         english[text]?.let { return it }
         if (text.startsWith("✓ ")) return "✓ " + (english[text.removePrefix("✓ ")] ?: text.removePrefix("✓ "))

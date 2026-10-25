@@ -59,9 +59,9 @@ class ReadOnlyAssistantService(
         draftOrder: AssistantDraftOrder? = null,
         responseLanguage: String = "tr"
     ): AssistantAnswerResponse {
-        check(enabled) { "ARGENT AI yapılandırılmamış. Gateway ortamına ARGENT_AI_API_KEY ekleyin." }
         val english = responseLanguage.equals("en", true)
         val now = System.currentTimeMillis()
+        val alertFindings = if (asksForAlerts(question)) currentAlerts(portfolio, ticker, marketMode, now, dailyBaseline, english) else emptyList()
         val historySearch = buildHistorySearch(question, orders, fills, now, english)
         // History searches are already filtered locally; do not send unrelated records to the LLM.
         val historyOnly = historySearch != null
@@ -141,8 +141,8 @@ class ReadOnlyAssistantService(
                 }
             }
             if (historySearch != null) put("historySearch", historySearch)
-            if (asksForAlerts(question)) put("currentAlerts", buildJsonArray {
-                currentAlerts(portfolio, ticker, marketMode, now, dailyBaseline, english).forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) }
+            if (alertFindings.isNotEmpty()) put("currentAlerts", buildJsonArray {
+                alertFindings.forEach { add(kotlinx.serialization.json.JsonPrimitive(it)) }
             })
             if (asksForDemo(question)) put("demoScenarios", demoScenarios(english))
         }
@@ -190,6 +190,17 @@ class ReadOnlyAssistantService(
         if (historySearch != null) {
             return AssistantAnswerResponse(summarizeHistorySearch(historySearch, english), now, marketTimestamp, sources, marketMode)
         }
+        if (alertFindings.isNotEmpty()) {
+            val answer = if (alertFindings.size == 1 && (alertFindings.single().startsWith("No configured alert threshold") || alertFindings.single().startsWith("Mevcut verilerde"))) {
+                if (english) "I checked your account and market data. No configured risk or data-feed alert thresholds are currently breached."
+                else "Hesabını ve piyasa verisini kontrol ettim. Tanımlı risk veya veri akışı eşiklerini aşan bir durum görünmüyor."
+            } else {
+                val intro = if (english) "I checked. Here are the items to review:" else "Kontrol ettim. Dikkat edilmesi gerekenler:"
+                intro + "\n" + alertFindings.take(5).joinToString("\n") { "• $it" }
+            }
+            return AssistantAnswerResponse(answer, now, marketTimestamp, sources, marketMode)
+        }
+        check(enabled) { if (english) "ARGENT AI is not configured. Add ARGENT_AI_API_KEY to the gateway environment." else "ARGENT AI yapılandırılmamış. Gateway ortamına ARGENT_AI_API_KEY ekleyin." }
         val responseText = withContext(Dispatchers.IO) { request(payload, english) }
         val response = runCatching { json.decodeFromString(ChatResponse.serializer(), responseText) }
             .getOrElse { throw IllegalStateException("ARGENT AI yanıtı okunamadı") }

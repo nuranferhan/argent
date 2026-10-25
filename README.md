@@ -134,4 +134,4 @@ API yüzeyi ve bağımlılık koordinatları `argent-matching-core` Gradle modü
 
 ## Ayarlar ve gizli bilgiler
 
-Terminal ve Android Ayarlar bölümünde hesap özeti, açık/koyu tema, metin boyutu ve yenileme aralığı bulunur. API anahtarlarını `.env` içinde tutun; `.env` dosyasını GitHub'a göndermeyin. Örnek değişkenler `.env.example` içindedir.
+Terminal ve Android Ayarlar bölümünde hesap özeti, açık/koyu tema, metin boyutu ve yenileme aralığı bulunur. Örnek değişkenler `.env.example` içindedir.

@@ -1,6 +1,6 @@
 # ARGENT - Paper Trading Platform
 
-[![CI](https://github.com/nuranferhan/argent/actions/workflows/ci.yml/badge.svg)](https://github.com/nuranferhan/argent/actions/workflows/ci.yml)  [▶️ Proje videosunu izle](https://drive.google.com/file/d/1ggblq9ZRIR5iLo2keZh55Y5WGbn2pvzC/view?usp=sharing)
+[![CI](https://github.com/nuranferhan/argent/actions/workflows/ci.yml/badge.svg)](https://github.com/nuranferhan/argent/actions/workflows/ci.yml)  [▶️ ARGENT videosu](https://drive.google.com/file/d/1ggblq9ZRIR5iLo2keZh55Y5WGbn2pvzC/view?usp=sharing)
 
 ARGENT, kripto ve çoklu varlık piyasalarında emir yaşam döngüsünü, portföyü ve çift girişli muhasebeyi tek uygulamada deneyimleten bir **paper trading platformudur**. Gerçek aracı kuruma emir göndermez; emirler ARGENT eşleştirme motorunda işlenir.
 

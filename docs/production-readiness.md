@@ -7,7 +7,7 @@ Hedeflenen ürün; çok kiracılı, production kalitesinde bir internal exchange
 - Kotlin multi-module gateway, matching engine, ledger, risk/portfolio mantığı ve market data feed'i; ayrıca aynı gateway API'sini kullanan Compose Desktop ve Jetpack Compose Android client'ları.
 - Dahili limit/market/IOC/FOK matching, event replay, idempotent emir gönderimi, kalıcı order/trade saklama ve double-entry ledger settlement.
 - Production matching sırasında domain event'lerin ikinci ve sınırsız bir in-memory kopyası tutulmaz; kalıcı event kaynağı PostgreSQL'dir. Recovery, settlement recovery için yalnızca replay sırasında üretilen fill'leri yakalar.
-- Yerel Docker Compose servisleri, health/metrics endpoint'leri, Prometheus/Grafana yapılandırması ve Windows 11 başlatma/paketleme script'leri.
+- Yerel Docker Compose servisleri, health/metrics endpoint'leri, Prometheus/Grafana yapılandırması ve başlatma/paketleme script'leri.
 - PostgreSQL backup/restore script'leri ve izole restore doğrulaması (`scripts/backup-db.ps1`, `scripts/restore-db.ps1`, `scripts/verify-db-backup-restore.ps1`).
 - Yapılandırılabilir simulated market-data adapter'ı, dahili market-making strategy ve yapılandırılmamış external deposit/withdrawal işlemlerini güvenli biçimde reddetme.
 - Tenant workspace'leri, OWNER/ADMIN/TRADER/VIEWER rolleri, e-posta adresine bağlı invitation'lar, davetli kullanıcı onboarding'i, tenant'a bağlı session'lar, üyelik başına trading account'ları ve sunucu tarafında uygulanan salt okunur VIEWER yetkisi.
@@ -51,7 +51,7 @@ Kararlar verildiğinde credential'ları seçilen secret manager'da saklayın ve 
 
 ## Doğrulama kaydı
 
-Proje sahibi `scripts/verify-db-backup-restore.ps1` komutunun Windows 11'de başarıyla tamamlandığını bildirdi. İzole restore ledger dengesini doğruladı. Proje sahibi Windows 1.0.3 MSI'ı oluşturup yükledi; gateway ledger migration düzeltmesiyle yeniden derlendikten sonra yerel release kontrolü geçti: health, ledger invariant, matching engine, PostgreSQL, Redis, RabbitMQ, 38 account/asset reconciliation çifti, installer varlığı ve kurulu sürüm. Desktop'ta tenant invitation kabulü, emir fill/cancel ve market-maker kill/resume akışları da denendi. Bunlar yerel mühendislik kontrolleridir; harici production sertifikasyonu değildir.
+Proje sahibi `scripts/verify-db-backup-restore.ps1` komutunun başarıyla tamamlandığını bildirdi. İzole restore ledger dengesini doğruladı. Proje sahibi Windows 1.0.3 MSI'ı oluşturup yükledi; gateway ledger migration düzeltmesiyle yeniden derlendikten sonra yerel release kontrolü geçti: health, ledger invariant, matching engine, PostgreSQL, Redis, RabbitMQ, 38 account/asset reconciliation çifti, installer varlığı ve kurulu sürüm. Desktop'ta tenant invitation kabulü, emir fill/cancel ve market-maker kill/resume akışları da denendi. Bunlar yerel mühendislik kontrolleridir; harici production sertifikasyonu değildir.
 
 2026-10-13'te JDK 21 üzerinde `:argent-engine:test`, `:argent-ledger:test`, `:argent-gateway:test`, `:argent-market:test`, `:argent-risk:test` ve `:argent-terminal:compileKotlin` başarılı oldu. Gateway iki bloklamayan Ktor `Principal` deprecation warning'i verdi. Proje sahibi Windows/Docker üzerinde isteğe bağlı PostgreSQL testini çalıştırdı; eski journal ownership migration'ı ve reconciliation dahil test geçti. Gateway yeniden derlendikten sonra 1.0.3 yerel release kabulü de geçti. JMH 1.37 sonucu bir microbenchmark'tır; production kapasite iddiası değildir. Android emulator iş akışı kabulü hâlâ açık.
 

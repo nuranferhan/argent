@@ -1,6 +1,6 @@
 # ARGENT yerel operasyon kılavuzu
 
-Bu kılavuz Windows 11 üzerinde çalışan yerel internal-exchange kurulumu içindir. Emirler, bakiyeler ve fiyatlar dahili sandbox verileridir. Servisleri public internet'e açmayın ve bakiyeleri müşteri fonu olarak değerlendirmeyin.
+Bu kılavuz yerel internal-exchange kurulumu içindir. Emirler, bakiyeler ve fiyatlar dahili sandbox verileridir. Servisleri public internet'e açmayın ve bakiyeleri müşteri fonu olarak değerlendirmeyin.
 
 ## Başlatma ve doğrulama
 

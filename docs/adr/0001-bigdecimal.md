@@ -1,13 +1,13 @@
-# ADR 0001 — Monetary amounts are `BigDecimal`, never IEEE-754
+# ADR 0001 — Parasal tutarlarda IEEE-754 yerine `BigDecimal`
 
-## Status
-Accepted
+## Durum
+Kabul edildi
 
-## Context
-Matching, margin, and double-entry settlement must be exact. `Double`/`Float` cannot represent 0.1 and accumulate rounding error across fills.
+## Bağlam
+Eşleştirme, marjin ve çift taraflı settlement işlemleri kesin sonuç vermelidir. `Double`/`Float`, 0.1 değerini tam temsil edemez ve dolumlar boyunca yuvarlama hatası biriktirir.
 
-## Decision
-All prices, quantities, notionals, balances, and PnL use `java.math.BigDecimal`. Wire format is decimal strings. Scale is applied only at instrument tick/lot boundaries (`HALF_UP`).
+## Karar
+Tüm fiyatlar, miktarlar, işlem tutarları (notional), bakiyeler ve PnL değerleri `java.math.BigDecimal` kullanır. Wire format ondalık metinlerden oluşur. Scale yalnızca enstrümanın tick/lot sınırlarında uygulanır (`HALF_UP`).
 
-## Consequences
-CPU cost is higher than longs. Throughput is still tens of thousands of orders/sec on a laptop actor. Correctness is the invariant of a broker ledger.
+## Sonuçlar
+CPU maliyeti `long` kullanımına göre daha yüksektir. Buna rağmen bir laptop üzerinde actor başına saniyede on binlerce emir işlenebilir. Broker ledger'ında doğruluk temel değişmezdir.

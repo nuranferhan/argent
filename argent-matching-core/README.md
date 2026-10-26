@@ -1,6 +1,6 @@
 # ARGENT Matching Core
 
-Reusable library facade over the ARGENT matching engine and double-entry ledger.
+ARGENT matching engine ve double-entry ledger üzerine kurulmuş yeniden kullanılabilir library facade.
 
 ```kotlin
 val core = ArgentMatchingCore(dataSource) { event -> durableEventStore.append(event) }
@@ -8,6 +8,6 @@ val ledger = core.ledger
 val matchingEngine = core.matchingEngine
 ```
 
-Use `newMatchingEngine(eventSink = ..., keepRecordedEvents = false)` for isolated replay or other engine instances. Publish to the local Maven repository with `gradlew :argent-matching-core:publishToMavenLocal`.
+İzole replay veya başka engine örnekleri için `newMatchingEngine(eventSink = ..., keepRecordedEvents = false)` kullanın. Library'yi yerel Maven repository'ye yayımlamak için `gradlew :argent-matching-core:publishToMavenLocal` komutunu çalıştırın.
 
-The module exposes internal paper-trading primitives. It does not connect to a broker or custody real assets.
+Modül, dahili paper-trading yapıtaşlarını sunar. Bir broker'a bağlanmaz ve gerçek varlıkları saklamaz.

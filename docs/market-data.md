@@ -1,57 +1,57 @@
-# Market data and Binance Spot Testnet
+# Piyasa verileri ve Binance Spot Testnet
 
-ARGENT has separate market-data and execution paths: Binance public crypto quotes, paper-simulated BIST and additional instruments when no live feed is available, optional provider-sourced BIST quotes, caller-supplied BIST history replay, internal matching, and orders to Binance Spot Testnet. Market data never implies real-money execution.
+ARGENT, piyasa verisi ve emir yürütme için ayrı akışlar kullanır: Binance public crypto kotasyonları, canlı feed olmadığında paper-simulated BIST ve ek enstrüman fiyatları, isteğe bağlı sağlayıcı kaynaklı BIST kotasyonları, kullanıcı tarafından sağlanan BIST geçmiş verisi replay'i, dahili matching ve Binance Spot Testnet'e gönderilen emirler. Piyasa verisi, gerçek parayla işlem yapıldığı anlamına gelmez.
 
-## Public crypto prices
+## Public crypto fiyatları
 
-The default is `MARKET_DATA_MODE=BINANCE_PUBLIC`: real crypto tickers stream from Binance's public WebSocket without an API key. BIST prices are simulated by default using seeded, labeled paper quotes and a small random walk. This fallback stays active when `ISTFIN_BIST` is selected but its live quotes are missing or stale; fresh provider quotes take precedence. Borsa İstanbul distributes market data through authorized data vendors; a public webpage or an unofficial scraper is not a substitute for permission to display a feed in ARGENT. The optional istfin adapter requires an API key and provider entitlement; verify current price, delay, entitlement and display rights before enabling it. Keep the provider key in the ignored local `.env` file or deployment secret store; never commit it. Regular ARGENT orders still use the internal matching engine, not BIST. `MARKET_DATA_MODE=SIMULATED` selects paper prices for every instrument. Nasdaq reference quotes and headlines can be enabled with a Finnhub API key, subject to provider limits and display license. Binance Spot Testnet execution is configured separately with its own Testnet-only credentials.
+Varsayılan ayar `MARKET_DATA_MODE=BINANCE_PUBLIC` değeridir: gerçek crypto ticker'ları Binance public WebSocket üzerinden API key olmadan alınır. BIST fiyatları varsayılan olarak başlangıç değerleri belirlenmiş, paper etiketi taşıyan ve küçük bir random walk kullanan simülasyonla üretilir. `ISTFIN_BIST` seçildiğinde canlı kotasyon eksik veya eskiyse bu fallback çalışmaya devam eder; güncel sağlayıcı kotasyonları önceliklidir. Borsa İstanbul piyasa verisini yetkili veri dağıtım şirketleri üzerinden sunar. Public bir web sayfası veya resmi olmayan scraper, ARGENT'te feed gösterme izninin yerine geçmez. İsteğe bağlı istfin adapter'ı API key ve sağlayıcı yetkisi gerektirir; etkinleştirmeden önce güncel fiyatı, gecikmeyi, yetki kapsamını ve gösterim haklarını doğrulayın. Sağlayıcı key'ini yok sayılan yerel `.env` dosyasında veya deployment secret store içinde tutun; commit etmeyin. Normal ARGENT emirleri BIST'e değil dahili matching engine'e gider. `MARKET_DATA_MODE=SIMULATED`, her enstrüman için paper fiyatlarını seçer. Nasdaq referans kotasyonları ve haber başlıkları Finnhub API key ile etkinleştirilebilir; sağlayıcı limitleri ve gösterim lisansı geçerlidir. Binance Spot Testnet emir yürütmesi ayrı yapılandırılır ve yalnızca Testnet'e ait kimlik bilgilerini kullanır.
 
-For local development, add the key to the ignored root `.env` file and rebuild the gateway. Never paste it into chat or commit it:
+Yerel geliştirme için key'i yok sayılan kök `.env` dosyasına ekleyip gateway'i yeniden derleyin. Key'i sohbete yapıştırmayın veya commit etmeyin:
 
 ```dotenv
 MARKET_DATA_MODE=ISTFIN_BIST
 ISTFIN_API_KEY=your_provider_key
 ```
 
-The gateway polls all configured BIST symbols in one request, respects `429` retry hints and backs off on provider failures. Quotes include the provider's `asOf` time and no synthetic bid/ask is fabricated when the provider does not return one. An API key alone does not grant permission to redistribute or display market data; obtain the required right for the way you plan to show ARGENT.
+Gateway, yapılandırılmış tüm BIST sembollerini tek istekte sorgular; `429` retry ipuçlarına uyar ve sağlayıcı hatalarında bekleme süresini artırır. Kotasyonlarda sağlayıcının `asOf` zamanı bulunur. Sağlayıcı bid/ask döndürmüyorsa sentetik bid/ask üretilmez. API key tek başına piyasa verisini yeniden dağıtma veya gösterme hakkı vermez; ARGENT'te planladığınız gösterim biçimi için gerekli izni alın.
 
 ## Binance Spot Testnet
 
-Create credentials specifically for Binance Spot Testnet by following Binance's [official Spot Testnet terms and documentation](https://developers.binance.com/en/docs/products/spot/testnet/TESTNET-TERMS-OF-USE). Do not use a production key. Keep both values in the ignored local `.env` file at the repository root:
+Binance Spot Testnet için özel kimlik bilgileri oluştururken Binance'in [resmî Spot Testnet şartlarını ve dokümantasyonunu](https://developers.binance.com/en/docs/products/spot/testnet/TESTNET-TERMS-OF-USE) izleyin. Production key kullanmayın. Her iki değeri de repository kökündeki yok sayılan yerel `.env` dosyasında tutun:
 
 ```dotenv
 BINANCE_SPOT_TESTNET_API_KEY=your_testnet_key
 BINANCE_SPOT_TESTNET_SECRET=your_testnet_secret
 ```
 
-Never commit `.env`, paste credentials in chat, or enable withdrawals on any API key. Restart/rebuild the local gateway after setting values:
+`.env` dosyasını commit etmeyin, kimlik bilgilerini sohbete yapıştırmayın ve hiçbir API key için withdrawals özelliğini açmayın. Değerleri ekledikten sonra yerel gateway'i yeniden başlatın/derleyin:
 
 ```powershell
 docker compose --profile app up -d --build gateway
 ```
 
-After the gateway is healthy, sign in to the desktop as the global `ADMIN` and open **Çalışma alanı**. The Spot Testnet panel reports whether credentials are configured. LIMIT (GTC/IOC/FOK) and MARKET orders, status lookups, and cancellation go only to `https://testnet.binance.vision`.
+Gateway sağlıklı duruma geldikten sonra masaüstü uygulamasında global `ADMIN` hesabıyla oturum açıp **Çalışma alanı** bölümünü açın. Spot Testnet paneli kimlik bilgilerinin ayarlı olup olmadığını gösterir. LIMIT (GTC/IOC/FOK) ve MARKET emirleri, durum sorgulama ve iptal işlemleri yalnızca `https://testnet.binance.vision` adresine gider.
 
-For a newly submitted testnet order, ARGENT records the client/order mapping locally and reserves the required simulated asset before sending the request. It fetches Binance's per-order trade executions and applies each fill exactly once to the ARGENT ledger, including base/quote commissions and third-asset commissions when that asset has enough simulated available balance. Partial fills update balances while the open remainder stays reserved. Cancellation or terminal completion releases the unspent reserve. A background poller continues syncing active orders while the gateway runs and resumes tracked active orders after restart. If fill history is incomplete or a commission cannot be settled locally, the order is marked `SETTLEMENT_REVIEW` and the hold remains in place for safety.
+Yeni bir Testnet emri gönderildiğinde ARGENT, client/order eşlemesini yerel olarak kaydeder ve isteği göndermeden önce gerekli simüle varlığı rezerve eder. Her fill yalnızca bir kez ARGENT ledger'ına işlenir; bunun için Binance'in emir başına trade execution kayıtları alınır. Base/quote commission ve ilgili varlıkta yeterli simüle bakiye varsa üçüncü varlık commission'ları da hesaba katılır. Partial fill durumunda bakiyeler güncellenirken açık emir miktarı rezerve kalır. İptal veya terminal durumdaki tamamlanma, kullanılmayan rezervi serbest bırakır. Gateway çalışırken background poller aktif emirlerin durumunu eşitler ve restart sonrasında izlenen aktif emirleri yeniden takibe alır. Fill geçmişi eksikse veya commission yerel olarak settlement edilemiyorsa güvenlik amacıyla emir `SETTLEMENT_REVIEW` durumuna alınır ve bakiye blokesi korunur.
 
-ARGENT's seeded development balances are **not imported from Binance Testnet** and therefore do not necessarily equal the starting Testnet wallet. After executions, ARGENT mirrors the fill deltas and commissions into its own simulated balances; Binance separately enforces its Testnet wallet funds. Testnet balances and actual orders remain in Binance's sandbox, and no real money is used.
+ARGENT'in başlangıçta verdiği geliştirme bakiyeleri **Binance Testnet'ten alınmaz**; bu nedenle Testnet cüzdanının başlangıç bakiyesiyle aynı olmayabilir. İşlemlerden sonra ARGENT, fill farklarını ve commission'ları kendi simüle bakiyelerine yansıtır. Binance ise Testnet cüzdanındaki fonları ayrıca kontrol eder. Testnet bakiyeleri ve gerçek emirler Binance sandbox'ında kalır; gerçek para kullanılmaz.
 
-The gateway uses a single local Testnet key pair, so access is ADMIN-only. It is intended for a local development instance, not a shared/public deployment. The key and secret are read from environment variables and are never returned by the status endpoint or deliberately written to logs. The Testnet host is a constant in code; there is no configurable production endpoint.
+Gateway tek bir yerel Testnet key pair kullanır; bu nedenle erişim yalnızca ADMIN rolüne açıktır. Bu özellik paylaşılan/public deployment için değil, yerel geliştirme içindir. Key ve secret environment variable'lardan okunur; status endpoint'inden döndürülmez ve bilerek log'lara yazılmaz. Testnet host'u kod içinde sabittir; production endpoint yapılandırması yoktur.
 
 Admin API:
 
-- `GET /api/v1/admin/binance-spot-testnet` — reports whether the two credentials are configured.
-- `POST /api/v1/admin/binance-spot-testnet/orders` — JSON: `{"symbol":"BTCUSDT","side":"BUY","type":"LIMIT","quantity":"0.001","price":"30000","timeInForce":"GTC","clientOrderId":"argent-demo-1"}`. `type` is `LIMIT` or `MARKET`; `timeInForce` for LIMIT is `GTC`, `IOC`, or `FOK`.
-- `GET /api/v1/admin/binance-spot-testnet/orders/{orderId}?symbol=BTCUSDT` — query order status.
-- `DELETE /api/v1/admin/binance-spot-testnet/orders/{orderId}?symbol=BTCUSDT` — cancel an order.
+- `GET /api/v1/admin/binance-spot-testnet` — iki kimlik bilgisinin ayarlı olup olmadığını bildirir.
+- `POST /api/v1/admin/binance-spot-testnet/orders` — JSON: `{"symbol":"BTCUSDT","side":"BUY","type":"LIMIT","quantity":"0.001","price":"30000","timeInForce":"GTC","clientOrderId":"argent-demo-1"}`. `type`, `LIMIT` veya `MARKET`; LIMIT için `timeInForce`, `GTC`, `IOC` veya `FOK) olabilir.
+- `GET /api/v1/admin/binance-spot-testnet/orders/{orderId}?symbol=BTCUSDT` — emir durumunu sorgular.
+- `DELETE /api/v1/admin/binance-spot-testnet/orders/{orderId}?symbol=BTCUSDT` — emri iptal eder.
 
-All endpoints require the ARGENT admin Bearer token. An exchange rejection (for example, invalid symbol filters or insufficient Testnet balance) is reported; the adapter does not silently route the order into internal matching.
+Tüm endpoint'ler ARGENT admin Bearer token'ı gerektirir. Exchange tarafından reddedilen emirler (örneğin geçersiz symbol filter veya yetersiz Testnet bakiyesi) hata olarak bildirilir; adapter emri sessizce dahili matching'e yönlendirmez.
 
-## BIST history replay
+## BIST geçmiş verisi replay'i
 
-Live BIST history replay is opt-in; the default BIST paper-price simulator runs independently. The replay API accepts a CSV supplied by the local admin; ARGENT does not download, redistribute, or grant rights to BIST data. Check the data provider's terms before importing or sharing files. Do not include licensed datasets or private data in GitHub.
+Canlı BIST geçmiş verisi replay'i isteğe bağlıdır; varsayılan BIST paper-price simulator bundan bağımsız çalışır. Replay API, yerel admin'in sağladığı CSV dosyasını kabul eder. ARGENT BIST verisini indirmez, yeniden dağıtmaz veya bu verinin kullanım hakkını sağlamaz. Dosyaları içe aktarmadan ya da paylaşmadan önce veri sağlayıcısının şartlarını kontrol edin. Lisanslı veri setlerini veya özel verileri GitHub'a eklemeyin.
 
-Accepted CSV columns, in this order:
+Kabul edilen CSV sütunları ve sıraları:
 
 ```csv
 timestamp,symbol,price,volume24h
@@ -59,9 +59,9 @@ timestamp,symbol,price,volume24h
 2026-01-02T10:01:00Z,THYAO,300.50,1250
 ```
 
-`volume24h` is optional. Timestamps may be Unix milliseconds or ISO-8601 and rows must be time ordered. Symbols must be configured equity instruments (`THYAO`, `GARAN`, `ASELS`, `EREGL`, `SISE`). Limits: 50,000 rows and 2 MiB. The `speed` value divides timestamp gaps; the default `1000` compresses one minute to about 60 ms. Long gaps are capped at five seconds. During replay, the equity simulator pauses; crypto simulation/public data continues.
+`volume24h` isteğe bağlıdır. Timestamp değerleri Unix milliseconds veya ISO-8601 olabilir; satırlar zaman sırasına göre olmalıdır. Semboller yapılandırılmış equity enstrümanlarından biri olmalıdır (`THYAO`, `GARAN`, `ASELS`, `EREGL`, `SISE`). Limitler: 50.000 satır ve 2 MiB. `speed` değeri timestamp aralıklarını böler; varsayılan `1000`, bir dakikayı yaklaşık 60 ms'ye sıkıştırır. Uzun aralıklar beş saniyeyle sınırlandırılır. Replay sırasında equity simulator duraklar; crypto simülasyonu/public data akışı devam eder.
 
-After obtaining an ARGENT admin token, PowerShell can send a local CSV:
+ARGENT admin token'ı aldıktan sonra PowerShell ile yerel CSV'yi gönderebilirsiniz:
 
 ```powershell
 $csv = Get-Content .\bist-history.csv -Raw
@@ -74,5 +74,6 @@ Invoke-RestMethod http://127.0.0.1:8080/api/v1/admin/market-data/bist/replay `
   -Headers @{ Authorization = "Bearer $token" }
 ```
 
-The response includes a replay ID, state, row count, and processed count. Ticker updates are emitted to the normal ticker stream with source `bist-csv-replay`. This is historical playback, not a licensed live BIST feed and not a BIST execution venue.
-Binance Spot Testnet signed requests synchronize their timestamp against the fixed Testnet server-time endpoint to tolerate local clock drift. Credentials remain gateway-local and are never sent to the desktop client.
+Yanıt replay ID'si, state, satır sayısı ve işlenen satır sayısını içerir. Ticker güncellemeleri normal ticker stream'ine `bist-csv-replay` kaynağıyla gönderilir. Bu, geçmiş verinin oynatılmasıdır; lisanslı canlı BIST feed'i veya BIST işlem yeri değildir.
+
+Binance Spot Testnet imzalı istekleri, yerel saat sapmasına tolerans göstermek için sabit Testnet server-time endpoint'iyle timestamp eşlemesi yapar. Kimlik bilgileri gateway üzerinde kalır ve desktop client'a gönderilmez.

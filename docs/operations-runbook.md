@@ -1,56 +1,55 @@
-# ARGENT local operations runbook
+# ARGENT yerel operasyon kılavuzu
 
-This runbook applies to the Windows 11 local internal-exchange deployment. Orders, balances and prices are internal sandbox data. Do not expose these services to the public internet or treat balances as customer funds.
+Bu kılavuz Windows 11 üzerinde çalışan yerel internal-exchange kurulumu içindir. Emirler, bakiyeler ve fiyatlar dahili sandbox verileridir. Servisleri public internet'e açmayın ve bakiyeleri müşteri fonu olarak değerlendirmeyin.
 
-## Start and verify
+## Başlatma ve doğrulama
 
-1. Start Docker Desktop and wait until its engine is ready.
-2. Open PowerShell in `C:\Users\Lenovo\Projects\argent`.
-3. Start the local stack with `.\scripts\start-stack.ps1` or start infrastructure with `docker compose up -d` and run `.\scripts\start.ps1` for the host gateway. Keep the foreground gateway window open.
-4. To build the updated desktop client, run `.\scripts\package-terminal.ps1` in another PowerShell window, then install `argent-terminal\build\compose\binaries\main\msi\Argent-1.0.3.msi`. Keep the gateway window open while building/installing.
-5. Run `.\scripts\verify-local-release.ps1`. A successful check reports API health, ledger invariant, PostgreSQL, Redis, RabbitMQ, admin ledger reconciliation, the 1.0.3 installer and installed executable. It creates then revokes a temporary refresh token but does not place orders or alter balances.
-6. Run `.\scripts/test-postgres-integration.ps1` with PostgreSQL running. The test creates a temporary schema, tests concurrent reservations and settlement replay across a new database connection, then drops the schema.
-7. Open ARGENT from the Windows Start menu. If login is rate-limited, wait for the configured window or clear only the login rate-limit keys in Redis; do not flush Redis or delete the database.
+1. Docker Desktop'ı başlatın ve engine'in hazır olmasını bekleyin.
+2. PowerShell'i `C:\Users\Lenovo\Projects\argent` klasöründe açın.
+3. Yerel stack'i `.\scripts\start-stack.ps1` ile başlatın veya altyapıyı `docker compose up -d` ile başlatıp host gateway için `.\scripts\start.ps1` çalıştırın. Gateway'in çalıştığı foreground penceresini açık tutun.
+4. Güncel desktop client'ı derlemek için başka bir PowerShell penceresinde `.\scripts\package-terminal.ps1` çalıştırın; ardından `argent-terminal\build\compose\binaries\main\msi\Argent-1.0.3.msi` paketini yükleyin. Derleme/yükleme sırasında gateway penceresini açık tutun.
+5. `.\scripts\verify-local-release.ps1` çalıştırın. Başarılı kontrol; API health, ledger invariant, PostgreSQL, Redis, RabbitMQ, admin ledger reconciliation, 1.0.3 installer ve yüklenmiş executable durumunu raporlar. Geçici bir refresh token oluşturup iptal eder; emir göndermez veya bakiyeyi değiştirmez.
+6. PostgreSQL çalışırken `.\scripts\test-postgres-integration.ps1` çalıştırın. Test geçici bir schema oluşturur; eşzamanlı reservation işlemlerini ve yeni bir database connection üzerinden settlement replay'i sınar, ardından schema'yı siler.
+7. ARGENT'i Windows Start menüsünden açın. Login rate limit'e takılırsa yapılandırılmış sürenin dolmasını bekleyin veya Redis'ten yalnızca login rate-limit key'lerini temizleyin; Redis'i tamamen boşaltmayın ve database'i silmeyin.
 
 ## Android sandbox client
 
-- Install Android Studio with Android SDK Platform 36, Build Tools 36.0.0 and Platform Tools; JDK 17 or newer is needed for AGP.
-- With the local gateway running, `scripts/package-android.ps1` builds a debug APK. `scripts/install-android.ps1` builds, connects to an authorized USB device/emulator, forwards port 8080 with `adb reverse`, and installs the APK.
-- On an Android emulator, the gateway URL is `http://10.0.2.2:8080`; with USB reverse on a physical device, use `http://127.0.0.1:8080`.
-- The debug variant allows local HTTP for this sandbox. The release variant disables cleartext traffic; configure HTTPS before using it with a remote gateway. The debug APK is not a signed distribution release.
-- Android feature acceptance still needs a real emulator/device run: login and invitation, quote/book updates, order/rejection/cancel, portfolio, workspace membership/role changes, and market-maker kill/resume. Do not use real funds; the gateway has internal matching and simulated BIST prices.
+- Android Studio'yu Android SDK Platform 36, Build Tools 36.0.0 ve Platform Tools ile kurun; AGP için JDK 17 veya üzeri gerekir.
+- Yerel gateway çalışırken `scripts/package-android.ps1` debug APK'sini derler. `scripts/install-android.ps1`, APK'yi derler, yetkili USB cihazına/emulator'a bağlanır, `adb reverse` ile 8080 portunu yönlendirir ve APK'yi yükler.
+- Android emulator'da gateway URL'si `http://10.0.2.2:8080`; USB reverse kullanılan fiziksel cihazda `http://127.0.0.1:8080` olur.
+- Debug variant bu sandbox için yerel HTTP bağlantısına izin verir. Release variant cleartext traffic'i kapatır; remote gateway kullanmadan önce HTTPS yapılandırın. Debug APK imzalı dağıtım sürümü değildir.
+- Android özelliklerinin kabulü gerçek emulator/cihazda hâlâ yapılmalıdır: login ve invitation, kotasyon/order book güncellemeleri, emir/rejection/cancel, portfolio, workspace membership/role değişiklikleri ve market-maker kill/resume. Gerçek para kullanmayın; gateway internal matching ve simüle BIST fiyatları kullanır.
 
-## Stop
+## Durdurma
 
-Stop the host gateway with Ctrl+C in the window running `start.ps1`. Stop Compose services with `docker compose --profile app down` when they were started with the app profile, or `docker compose down` for the base stack. Do not add `-v`; that deletes database volumes.
+Host gateway'i `start.ps1` çalıştıran pencerede Ctrl+C ile durdurun. App profile ile başlatılmış Compose servislerini `docker compose --profile app down`, temel stack ile başlatılanları `docker compose down` ile durdurun. Database volume'larını sildiği için `-v` eklemeyin.
 
-## Routine backup and restore
+## Düzenli backup ve restore
 
-- Create a backup: `.\scripts\backup-db.ps1`.
-- Store the resulting dump outside the machine for a real disaster-recovery plan. The local script does not provide off-host encryption, retention, or immutable storage by itself.
-- Verify a dump without replacing production data: `.\scripts\verify-db-backup-restore.ps1`. This creates a disposable database, restores into it, checks representative table counts and ledger balance, then removes the disposable database.
-- To restore a selected backup, stop the gateway first and run `.\scripts\restore-db.ps1 <dump-path>`. The script requires the explicit phrase `RESTORE ARGENT` because it replaces existing database contents. Confirm the dump path and retain a separate copy before proceeding.
+- Backup oluşturmak için `.\scripts\backup-db.ps1` çalıştırın.
+- Gerçek bir disaster-recovery planı için oluşan dump'ı makine dışında saklayın. Yerel script tek başına off-host encryption, retention veya immutable storage sağlamaz.
+- Bir dump'ı production verisinin üzerine yazmadan doğrulamak için `.\scripts\verify-db-backup-restore.ps1` çalıştırın. Script geçici bir database oluşturur, dump'ı buraya yükler, örnek tablo sayılarını ve ledger bakiyesini kontrol eder; ardından geçici database'i kaldırır.
+- Seçilen bir backup'ı geri yüklemek için önce gateway'i durdurun ve `.\scripts\restore-db.ps1 <dump-path>` çalıştırın. Mevcut database içeriğini değiştirdiği için script açıkça `RESTORE ARGENT` yazmanızı ister. İşleme başlamadan önce dump yolunu doğrulayın ve ayrı bir kopyasını saklayın.
 
-The project owner reported a successful isolated restore on 2026-10-12: 18,274 journal entries, 4,732 orders, 4 trades, and `ledger invariant=balanced`. Repeat this verification after material schema or backup-script changes.
+Proje sahibi 2026-10-12 tarihinde izole bir restore işleminin başarıyla tamamlandığını bildirdi: 18.274 journal entry, 4.732 emir, 4 trade ve `ledger invariant=balanced`. Schema veya backup script'lerinde önemli değişikliklerden sonra bu doğrulamayı tekrarlayın.
 
-## Health and incident triage
+## Health ve olay inceleme
 
-| Signal | First action |
+| Sinyal | İlk adım |
 |---|---|
-| `/health` unreachable | Check Docker Desktop and `docker compose --profile app ps`; if using the host gateway, confirm the `start.ps1` window is still running. |
-| PostgreSQL or Redis false | Inspect `docker compose logs --tail 100 postgres redis`; do not reset volumes as a first response. |
-| RabbitMQ false | Inspect `docker compose logs --tail 100 rabbitmq`; do not accept the stack as healthy until `/health` returns `UP`. |
-| `invariantOk` false or engine unhealthy | Stop submitting new orders, preserve logs and database volume, and investigate before restarting. Do not hand-edit ledger rows. |
-| Login rate limited | Wait for the configured rate window. If an operator clears a key, delete only `rl:auth:login:*` keys in Redis; never use `FLUSHALL`. |
-| Suspected market-maker issue | Use the desktop admin kill switch first, verify it is disabled, then preserve logs and inspect bot orders/inventory before resuming. |
-| Suspected secret exposure | Rotate `JWT_SECRET` and bootstrap/admin passwords using the deployment's secret source; invalidate sessions by restarting the gateway after rotation. Do not paste new values into chat or commit them. |
+| `/health` erişilemiyor | Docker Desktop'ı ve `docker compose --profile app ps` çıktısını kontrol edin. Host gateway kullanıyorsanız `start.ps1` penceresinin hâlâ çalıştığını doğrulayın. |
+| PostgreSQL veya Redis değeri false | `docker compose logs --tail 100 postgres redis` çıktısını inceleyin; ilk adım olarak volume'ları sıfırlamayın. |
+| RabbitMQ değeri false | `docker compose logs --tail 100 rabbitmq` çıktısını inceleyin; `/health` yanıtı `UP` olmadan stack'i sağlıklı kabul etmeyin. |
+| `invariantOk` false veya engine sağlıksız | Yeni emir göndermeyi durdurun, log'ları ve database volume'unu koruyun; yeniden başlatmadan önce nedeni araştırın. Ledger satırlarını elle düzenlemeyin. |
+| Login rate limit'e takıldı | Yapılandırılmış rate window süresini bekleyin. Operatör bir key'i temizleyecekse Redis'te yalnızca `rl:auth:login:*` key'lerini silin; `FLUSHALL` kullanmayın. |
+| Market-maker sorunu şüphesi | Önce desktop admin kill switch'i kullanın ve devre dışı kaldığını doğrulayın. Yeniden başlatmadan önce log'ları koruyup bot emirlerini/stokunu inceleyin. |
+| Secret açığa çıkmış olabilir | `JWT_SECRET` ve bootstrap/admin password değerlerini deployment secret kaynağından değiştirin; değişiklikten sonra gateway'i yeniden başlatarak session'ları geçersiz kılın. Yeni değerleri sohbete yapıştırmayın veya commit etmeyin. |
 
-Record the timestamp, affected service, observed health JSON, recent gateway/container logs, operator actions and outcome. Keep a copy of the pre-incident database before attempting repair.
+Timestamp, etkilenen service, görülen health JSON, son gateway/container log'ları, operatör işlemleri ve sonucu kaydedin. Onarıma başlamadan önce incident öncesi database kopyasını saklayın.
 
-## Security and release boundaries
+## Güvenlik ve release sınırları
 
-- Keep database, Redis, RabbitMQ, Prometheus and Grafana bound to localhost for this local profile. Never publish these ports to an untrusted network.
-- Use unique secrets for any shared/staging deployment. `.env.example` credentials and the development JWT value are local-only.
-- Current health checks and Grafana dashboards are local observability; paging, alert routing, on-call ownership, encrypted off-host backups, TLS termination, secret-manager integration, MFA/recovery, independent review and disaster-recovery objectives still require deployment-specific setup and acceptance.
-- This build uses internal matching and simulated prices. No real exchange order, BIST licensed feed, deposit, withdrawal, custody or payment is provided.
-
+- Bu yerel profile'da database, Redis, RabbitMQ, Prometheus ve Grafana portlarını localhost'a bağlı tutun. Bu portları güvenilmeyen bir ağa açmayın.
+- Paylaşılan/staging deployment için benzersiz secret'lar kullanın. `.env.example` içindeki kimlik bilgileri ve geliştirme JWT değeri yalnızca yerel kullanım içindir.
+- Mevcut health check'ler ve Grafana dashboard'ları yerel observability sağlar. Paging, alert routing, on-call sorumluluğu, şifreli off-host backup, TLS termination, secret-manager entegrasyonu, MFA/recovery, bağımsız inceleme ve disaster-recovery hedefleri deployment'a özel kurulum ve kabul gerektirir.
+- Bu build internal matching ve simüle fiyatlar kullanır. Gerçek exchange emri, lisanslı BIST feed'i, deposit, withdrawal, custody veya payment hizmeti sunmaz.

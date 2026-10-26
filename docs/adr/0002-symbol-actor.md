@@ -1,13 +1,13 @@
-# ADR 0002 — One coroutine actor per symbol
+# ADR 0002 — Her symbol için bir coroutine actor
 
-## Status
-Accepted
+## Durum
+Kabul edildi
 
-## Context
-A central matching engine must be deterministic: same order stream, same trades. Concurrent mutation of a single book is a data race. Sharding by symbol is how real exchanges isolate books.
+## Bağlam
+Merkezi bir matching engine deterministik olmalıdır: aynı emir akışı aynı işlemleri üretmelidir. Tek bir order book üzerinde eşzamanlı değişiklik yapılması data race oluşturur. Gerçek borsalar da order book'ları birbirinden ayırmak için symbol bazında shard kullanır.
 
-## Decision
-Each symbol owns a Kotlin coroutine actor (`Channel.UNLIMITED`) and a `ConcurrentSkipListMap` book. Submit, cancel, depth, restore, and replay commands are serialized per symbol. Different symbols proceed in parallel.
+## Karar
+Her symbol, bir Kotlin coroutine actor (`Channel.UNLIMITED`) ve bir `ConcurrentSkipListMap` order book sahibi olur. Submit, cancel, depth, restore ve replay komutları symbol başına sıraya alınır. Farklı symbol'ler paralel ilerler.
 
-## Consequences
-A hot symbol is single-threaded by design (price-time FIFO). Horizontal scale is “more symbols / more processes”, not “more threads on one book”. Tests can replay the event log and assert identical depth and trade ids.
+## Sonuçlar
+Yoğun işlem gören bir symbol tasarım gereği tek thread üzerinde çalışır (price-time FIFO). Horizontal scale, tek bir book'a daha fazla thread eklemek yerine daha fazla symbol veya process kullanılarak sağlanır. Testler event log'u yeniden oynatıp aynı depth ve trade ID değerlerini doğrulayabilir.

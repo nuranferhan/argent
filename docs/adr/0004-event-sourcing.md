@@ -1,13 +1,13 @@
-# ADR 0004 — Event log is the system of record for the book
+# ADR 0004 — Order book için sistem kaynağı event log'dur
 
-## Status
-Accepted
+## Durum
+Kabul edildi
 
-## Context
-The in-memory book dies with the JVM. Resting orders must survive crash. Rebuilding by replaying `OrderSubmitted`/`OrderCancelled` in sequence is deterministic and testable.
+## Bağlam
+JVM kapandığında bellekteki order book kaybolur. Bekleyen emirler crash sonrasında korunmalıdır. `OrderSubmitted` ve `OrderCancelled` olaylarını sırayla replay ederek book'u yeniden oluşturmak deterministik ve test edilebilirdir.
 
-## Decision
-Every engine and ledger fact is appended to `domain_events`. Runtime recovery restores active orders from the `orders` table (fast path) and settles any `TradeExecuted` missing from `trades` (crash window). Admin replay rebuilds a symbol book from the event stream.
+## Karar
+Engine ve ledger ile ilgili her olgu `domain_events` tablosuna eklenir. Runtime recovery, aktif emirleri hızlı yol olarak `orders` tablosundan geri yükler ve `trades` tablosunda bulunmayan `TradeExecuted` olaylarını settlement işlemine alır (crash window). Admin replay, bir symbol'ün order book'unu event stream üzerinden yeniden kurar.
 
-## Consequences
-PostgreSQL is both ledger and event store. RabbitMQ is a fan-out bus, not the source of truth. The matching path never waits on AMQP.
+## Sonuçlar
+PostgreSQL hem ledger hem event store olarak kullanılır. RabbitMQ bir fan-out bus'tır; sistemin doğruluk kaynağı değildir. Matching path, AMQP yanıtını beklemez.

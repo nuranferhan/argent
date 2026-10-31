@@ -231,6 +231,32 @@ class MatchingEngineTest : FunSpec({
         }
     }
 
+    test("event persistence outage rolls back the book and fails closed") {
+        runBlocking {
+            val engine = MatchingEngine(eventBus = { throw IllegalStateException("injected event-store outage") })
+            try {
+                var rejected = false
+                try {
+                    engine.submit(Order(userId = "u", symbol = "THYAO", side = OrderSide.BUY, type = OrderType.LIMIT, price = "100", quantity = "1"))
+                } catch (_: Exception) {
+                    rejected = true
+                }
+                rejected shouldBe true
+                engine.snapshot("THYAO") shouldBe emptyList()
+                engine.isHealthy() shouldBe false
+                var failClosed = false
+                try {
+                    engine.submit(Order(userId = "u2", symbol = "THYAO", side = OrderSide.BUY, type = OrderType.LIMIT, price = "99", quantity = "1"))
+                } catch (_: IllegalStateException) {
+                    failClosed = true
+                }
+                failClosed shouldBe true
+            } finally {
+                engine.shutdown()
+            }
+        }
+    }
+
     test("cancel racing a crossing order has exactly one serialized outcome") {
         runBlocking {
             val engine = MatchingEngine()

@@ -252,6 +252,11 @@ class OrderRepository(private val db: Database) {
             .map { rowToTrade(it) }
     }
 
+    /** Settlement recovery reads persisted trades directly instead of decoding the full event journal. */
+    fun findTradesForRecovery(): List<Trade> = transaction(db) {
+        Trades.selectAll().orderBy(Trades.executedAt to SortOrder.ASC, Trades.id to SortOrder.ASC).map(::rowToTrade)
+    }
+
     private fun rowToOrder(row: org.jetbrains.exposed.sql.ResultRow) = Order(
         id = row[Orders.id],
         clientOrderId = row[Orders.clientOrderId],

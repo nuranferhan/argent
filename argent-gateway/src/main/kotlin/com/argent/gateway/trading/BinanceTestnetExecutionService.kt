@@ -201,7 +201,9 @@ class BinanceTestnetExecutionService(
         val feeBuffer = BigDecimal("1.01")
         return when {
             request.side == "BUY" && request.type == "LIMIT" ->
-                instrument.quoteAsset to request.quantity.toBigDecimal().multiply(request.price!!.toBigDecimal()).multiply(feeBuffer)
+                instrument.quoteAsset to request.quantity.toBigDecimal().multiply(
+                    request.price?.toBigDecimalOrNull() ?: throw IllegalArgumentException("price is required for LIMIT")
+                ).multiply(feeBuffer)
             request.side == "BUY" -> {
                 val available = ledger.getBalance(accountId, instrument.quoteAsset).availableBd()
                 require(available > BigDecimal.ZERO) { "No available ${instrument.quoteAsset} to reserve for a market buy" }

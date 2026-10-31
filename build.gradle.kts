@@ -6,6 +6,7 @@ plugins {
     id("com.android.application") version "8.10.1" apply false
     id("org.jetbrains.kotlin.android") version "2.4.21" apply false
     id("me.champeau.jmh") version "0.7.3" apply false
+    id("jacoco")
 }
 
 allprojects {
@@ -22,6 +23,7 @@ allprojects {
 subprojects {
     if (name == "argent-terminal" || name == "argent-android") return@subprojects
 
+    apply(plugin = "jacoco")
     apply(plugin = "org.jetbrains.kotlin.jvm")
     apply(plugin = "org.jetbrains.kotlin.plugin.serialization")
 
@@ -53,5 +55,18 @@ subprojects {
 
     tasks.withType<Test>().configureEach {
         useJUnitPlatform()
+    }
+}
+
+
+tasks.register<JacocoReport>("jacocoRootReport") {
+    dependsOn(subprojects.mapNotNull { it.tasks.findByName("test") })
+    executionData.setFrom(fileTree(rootDir) { include("**/build/jacoco/test.exec") })
+    sourceDirectories.setFrom(files(subprojects.map { it.file("src/main/kotlin") }))
+    classDirectories.setFrom(files(subprojects.map { fileTree("${it.buildDir}/classes/kotlin/main") }))
+    reports {
+        xml.required.set(true)
+        html.required.set(true)
+        csv.required.set(false)
     }
 }

@@ -31,21 +31,35 @@ jobs:
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
 
-      - name: Install Android SDK packages
-        env:
-          ANDROID_HOME: /usr/local/lib/android/sdk
-          ANDROID_SDK_ROOT: /usr/local/lib/android/sdk
-        run: |
-          set +o pipefail
-          yes | "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --licenses >/dev/null
-          set -o pipefail
-          "$ANDROID_HOME/cmdline-tools/latest/bin/sdkmanager" --install "platform-tools" "platforms;android-36" "build-tools;36.0.0"
+      - name: Set up Android SDK
+        uses: android-actions/setup-android@v4
+        with:
+          packages: 'platform-tools platforms;android-36 build-tools;36.0.0'
+          accept-android-sdk-licenses: true
 
       - name: Make Gradle wrapper executable
-        run: chmod +x gradlew
+        run: chmod +x gradlew start.sh scripts/*.sh
 
-      - name: Run automated tests
+      - name: Run automated, concurrency and recovery tests
         run: ./gradlew test --no-daemon --max-workers=2
 
       - name: Compile desktop and Android apps
         run: ./gradlew :argent-terminal:compileKotlin :argent-android:compileDebugKotlin --no-daemon --max-workers=2
+
+      - name: Run Android UI smoke tests
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 35
+          arch: x86_64
+          target: google_apis
+          script: ./gradlew :argent-android:connectedDebugAndroidTest --no-daemon --max-workers=2
+
+      - name: Generate JVM coverage report
+        run: ./gradlew jacocoRootReport --no-daemon --max-workers=2
+
+      - name: Upload coverage report
+        uses: actions/upload-artifact@v4
+        with:
+          name: jacoco-coverage
+          path: build/reports/jacoco/jacocoRootReport/
+          if-no-files-found: error

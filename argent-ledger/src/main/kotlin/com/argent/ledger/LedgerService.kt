@@ -10,6 +10,7 @@ import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.insert
+import org.jetbrains.exposed.sql.SqlExpressionBuilder.like
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.update
@@ -135,8 +136,10 @@ class LedgerService(
                 """.trimIndent())
             }
             SchemaUtils.createMissingTablesAndColumns(Balances, JournalEntries, IdempotencyKeys, OrderHolds, Positions, Settlements)
-            runCatching { exec("ALTER TABLE idempotency_keys ALTER COLUMN key TYPE VARCHAR(256)") }
-            runCatching { exec("ALTER TABLE idempotency_keys ADD COLUMN IF NOT EXISTS request_hash VARCHAR(128)") }
+            if (isPostgres) {
+                exec("ALTER TABLE idempotency_keys ALTER COLUMN key TYPE VARCHAR(256)")
+                exec("ALTER TABLE idempotency_keys ADD COLUMN IF NOT EXISTS request_hash VARCHAR(128)")
+            }
         }
     }
 
@@ -287,6 +290,17 @@ class LedgerService(
         val firstTime = transaction(db) {
             val already = Settlements.selectAll().where { Settlements.tradeId eq tradeId }.firstOrNull()
             if (already != null) return@transaction false
+            if (hasLegacyTradePostings(
+                    tradeId, buyUserId, sellUserId, baseAsset, quoteAsset, quantity, notional
+                )
+            ) {
+                Settlements.insert {
+                    it[Settlements.tradeId] = tradeId
+                    it[createdAt] = Instant.now().toEpochMilli()
+                }
+                log.warn("Repaired missing settlement marker from existing ledger postings tradeId={}", tradeId)
+                return@transaction true
+            }
             Settlements.insert {
                 it[Settlements.tradeId] = tradeId
                 it[createdAt] = Instant.now().toEpochMilli()
@@ -310,6 +324,49 @@ class LedgerService(
         if (firstTime) {
             eventBus(SettlementCompleted(aggregateId = tradeId, tradeId = tradeId))
         }
+    }
+
+    /**
+     * Older releases could persist balanced trade journal postings without a
+     * settlement marker. On recovery, recognize only the complete four-leg
+     * posting set in one journal transaction; never reapply those balances.
+     */
+    private fun hasLegacyTradePostings(
+        tradeId: String,
+        buyUserId: String,
+        sellUserId: String,
+        baseAsset: String,
+        quoteAsset: String,
+        quantity: BigDecimal,
+        notional: BigDecimal
+    ): Boolean {
+        val marker = "trade=$tradeId"
+        val rows = JournalEntries.selectAll()
+            .where { JournalEntries.description like "%$marker%" }
+            .toList()
+        if (rows.size != 4 || rows.map { it[JournalEntries.txId] }.distinct().size != 1) return false
+
+        fun normalized(value: BigDecimal) = value.stripTrailingZeros().toPlainString()
+        data class Posting(val account: String, val asset: String, val debit: String, val credit: String)
+        val expected = setOf(
+            Posting(buyUserId, quoteAsset, normalized(notional), "0"),
+            Posting(sellUserId, quoteAsset, "0", normalized(notional)),
+            Posting(sellUserId, baseAsset, normalized(quantity), "0"),
+            Posting(buyUserId, baseAsset, "0", normalized(quantity))
+        )
+        val actual = rows.map { row ->
+            Posting(
+                account = row[JournalEntries.account],
+                asset = row[JournalEntries.asset],
+                debit = normalized(row[JournalEntries.debit]),
+                credit = normalized(row[JournalEntries.credit])
+            )
+        }.toSet()
+        return actual == expected
+    }
+
+    fun isTradeSettled(tradeId: String): Boolean = transaction(db) {
+        Settlements.selectAll().where { Settlements.tradeId eq tradeId }.count() > 0
     }
 
     /**

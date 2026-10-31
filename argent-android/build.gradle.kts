@@ -16,9 +16,12 @@ android {
         applicationId = "com.argent.android"
         minSdk = 26
         targetSdk = 35
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         versionCode = 103
         versionName = "1.0.3"
     }
+
+    sourceSets.getByName("main").java.srcDir("../argent-terminal/src/main/kotlin/com/argent/terminal/api")
 
     buildFeatures { compose = true }
     buildTypes {
@@ -37,8 +40,6 @@ kotlin {
         jvmTarget = JvmTarget.fromTarget("17")
     }
 }
-
-kotlin.sourceSets.getByName("main").kotlin.srcDir("../argent-terminal/src/main/kotlin/com/argent/terminal/api")
 
 dependencies {
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
@@ -59,4 +60,10 @@ dependencies {
     implementation("io.ktor:ktor-client-content-negotiation:3.0.1")
     implementation("io.ktor:ktor-client-websockets:3.0.1")
     implementation("io.ktor:ktor-serialization-kotlinx-json:3.0.1")
+
+    androidTestImplementation(platform("androidx.compose:compose-bom:2024.12.01"))
+    androidTestImplementation("androidx.compose.ui:ui-test-junit4")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    debugImplementation("androidx.compose.ui:ui-test-manifest")
 }

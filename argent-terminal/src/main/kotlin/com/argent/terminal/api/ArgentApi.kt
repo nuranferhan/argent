@@ -270,7 +270,9 @@ class ArgentApi(var baseUrl: String = "http://127.0.0.1:8080") {
         val url = baseUrl.replace("http://", "ws://").replace("https://", "wss://")
         while (true) {
             try {
-                client.webSocket("$url/ws/orderbook/$symbol") {
+                client.webSocket("$url/ws/orderbook/$symbol", request = {
+                    token?.let { header("Authorization", "Bearer $it") }
+                }) {
                     for (frame in incoming) {
                         if (frame is Frame.Text) {
                             emit(json.decodeFromString(OrderBookDto.serializer(), frame.readText()))
@@ -280,6 +282,26 @@ class ArgentApi(var baseUrl: String = "http://127.0.0.1:8080") {
             } catch (cancelled: CancellationException) {
                 throw cancelled
             } catch (_: Exception) {
+            }
+            delay(1_000)
+        }
+    }
+
+    fun orderUpdatesFlow(): Flow<OrderUpdateDto> = flow {
+        val url = baseUrl.replace("http://", "ws://").replace("https://", "wss://")
+        while (true) {
+            try {
+                client.webSocket("$url/ws/orders", request = {
+                    token?.let { header("Authorization", "Bearer $it") }
+                }) {
+                    for (frame in incoming) if (frame is Frame.Text) {
+                        emit(json.decodeFromString(OrderUpdateDto.serializer(), frame.readText()))
+                    }
+                }
+            } catch (cancelled: CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Reconnect after transient gateway/network failures.
             }
             delay(1_000)
         }
@@ -424,6 +446,7 @@ class ArgentApi(var baseUrl: String = "http://127.0.0.1:8080") {
 )
 @Serializable data class DepthLevelDto(val price: String, val quantity: String, val orderCount: Int)
 @Serializable data class OrderBookDto(val symbol: String, val bids: List<DepthLevelDto> = emptyList(), val asks: List<DepthLevelDto> = emptyList(), val bestBid: String? = null, val bestAsk: String? = null)
+@Serializable data class OrderUpdateDto(val event: String, val orderId: String, val symbol: String, val status: String)
 @Serializable data class BalanceDto(val userId: String, val asset: String, val available: String, val held: String, val version: Long = 0)
 @Serializable data class PositionDto(val userId: String, val symbol: String, val quantity: String, val avgEntryPrice: String, val realizedPnl: String)
 @Serializable data class PortfolioValuationDto(
@@ -432,10 +455,16 @@ class ArgentApi(var baseUrl: String = "http://127.0.0.1:8080") {
     val realizedPnl: String,
     val unrealizedPnl: String,
     val grossExposure: String,
-    val marginUsed: String,
-    val marginRatio: String,
     val priceComplete: Boolean,
     val pnlComplete: Boolean
+)
+@Serializable data class PortfolioUsdValuationDto(
+    val equity: String,
+    val realizedPnl: String,
+    val unrealizedPnl: String,
+    val grossExposure: String,
+    val complete: Boolean,
+    val rateDate: String
 )
 @Serializable data class PortfolioDto(
     val userId: String,
@@ -444,11 +473,9 @@ class ArgentApi(var baseUrl: String = "http://127.0.0.1:8080") {
     val equity: String = "0",
     val realizedPnl: String = "0",
     val unrealizedPnl: String = "0",
-    val marginUsed: String = "0",
-    val marginRatio: String = "0",
     val riskScore: Int = 0,
-    val marginCall: Boolean = false,
-    val valuations: List<PortfolioValuationDto> = emptyList()
+    val valuations: List<PortfolioValuationDto> = emptyList(),
+    val usdValuation: PortfolioUsdValuationDto? = null
 )
 @Serializable data class OrderDto(
     val id: String,

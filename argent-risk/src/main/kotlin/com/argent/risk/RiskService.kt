@@ -6,6 +6,7 @@ import com.argent.common.domain.OrderSide
 import com.argent.common.domain.OrderType
 import com.argent.common.domain.PortfolioSnapshot
 import com.argent.common.domain.PortfolioValuation
+import com.argent.common.domain.PortfolioUsdValuation
 import com.argent.ledger.LedgerService
 import java.math.BigDecimal
 import java.math.RoundingMode
@@ -75,7 +76,12 @@ class RiskService(
         return RiskCheckResult(true, requiredAsset = asset, requiredAmount = amount)
     }
 
-    fun portfolio(userId: String, prices: Map<String, BigDecimal>): PortfolioSnapshot {
+    fun portfolio(
+        userId: String,
+        prices: Map<String, BigDecimal>,
+        usdPerQuoteAsset: Map<String, BigDecimal> = mapOf("USD" to BigDecimal.ONE),
+        fxRateDate: String = "unavailable"
+    ): PortfolioSnapshot {
         val balances = ledger.listBalances(userId)
         val positions = ledger.listPositions(userId)
         val balanceByAsset = balances.associate { it.asset to it.totalBd() }
@@ -129,13 +135,35 @@ class RiskService(
                 realizedPnl = realized.stripTrailingZeros().toPlainString(),
                 unrealizedPnl = unrealized.stripTrailingZeros().toPlainString(),
                 grossExposure = exposure.stripTrailingZeros().toPlainString(),
-                marginUsed = "0",
-                marginRatio = "KAPALI",
                 priceComplete = priceComplete,
                 pnlComplete = pnlComplete
             )
         }
         val singleCurrency = valuations.singleOrNull()
+        var usdEquity = BigDecimal.ZERO
+        var usdRealized = BigDecimal.ZERO
+        var usdUnrealized = BigDecimal.ZERO
+        var usdExposure = BigDecimal.ZERO
+        var usdComplete = valuations.isNotEmpty()
+        valuations.forEach { valuation ->
+            val rate = usdPerQuoteAsset[valuation.quoteAsset]
+            if (rate == null) {
+                usdComplete = false
+            } else {
+                usdEquity += BigDecimal(valuation.equity).multiply(rate)
+                usdRealized += BigDecimal(valuation.realizedPnl).multiply(rate)
+                usdUnrealized += BigDecimal(valuation.unrealizedPnl).multiply(rate)
+                usdExposure += BigDecimal(valuation.grossExposure).multiply(rate)
+            }
+        }
+        val usdValuation = PortfolioUsdValuation(
+            equity = usdEquity.setScale(6, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString(),
+            realizedPnl = usdRealized.setScale(6, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString(),
+            unrealizedPnl = usdUnrealized.setScale(6, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString(),
+            grossExposure = usdExposure.setScale(6, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString(),
+            complete = usdComplete,
+            rateDate = fxRateDate
+        )
         val score = riskScore(positions, prices)
         return PortfolioSnapshot(
             userId = userId,
@@ -144,11 +172,9 @@ class RiskService(
             equity = singleCurrency?.equity ?: "",
             realizedPnl = singleCurrency?.realizedPnl ?: "",
             unrealizedPnl = singleCurrency?.unrealizedPnl ?: "",
-            marginUsed = singleCurrency?.marginUsed ?: "",
-            marginRatio = singleCurrency?.marginRatio ?: "",
             riskScore = score,
-            marginCall = false,
-            valuations = valuations
+            valuations = valuations,
+            usdValuation = usdValuation
         )
     }
 

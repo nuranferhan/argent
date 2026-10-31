@@ -107,6 +107,42 @@ class LedgerInvariantTest : FunSpec({
         l.verifyInvariant() shouldBe true
     }
 
+    test("recovery repairs a missing settlement marker from committed legacy postings") {
+        val ds = HikariDataSource(HikariConfig().apply {
+            jdbcUrl = "jdbc:h2:mem:legacy_settlement_${System.nanoTime()};MODE=PostgreSQL;DB_CLOSE_DELAY=-1"
+            maximumPoolSize = 4
+            isAutoCommit = false
+        })
+        val l = LedgerService(ds).also { it.initSchema() }
+        l.deposit("legacy-buyer", "TRY", BigDecimal("5000"), "legacy-buyer-seed")
+        l.deposit("legacy-seller", "THYAO", BigDecimal("10"), "legacy-seller-seed")
+        l.hold("legacy-buyer", "TRY", BigDecimal("1550"), "legacy-buy") shouldBe true
+        l.hold("legacy-seller", "THYAO", BigDecimal("5"), "legacy-sell") shouldBe true
+        l.settleTrade(
+            "legacy-trade", "THYAO", "legacy-buyer", "legacy-seller", "THYAO", "TRY",
+            BigDecimal("5"), BigDecimal("310"), "legacy-buy", "legacy-sell"
+        )
+        val buyerTryBeforeReplay = l.getBalance("legacy-buyer", "TRY").availableBd()
+        val buyerSharesBeforeReplay = l.getBalance("legacy-buyer", "THYAO").availableBd()
+        ds.connection.use { connection ->
+            connection.createStatement().use { statement ->
+                statement.executeUpdate("DELETE FROM settlements WHERE trade_id = 'legacy-trade'")
+                statement.executeUpdate("DELETE FROM order_holds WHERE order_id IN ('legacy-buy', 'legacy-sell')")
+            }
+        }
+
+        l.settleTrade(
+            "legacy-trade", "THYAO", "legacy-buyer", "legacy-seller", "THYAO", "TRY",
+            BigDecimal("5"), BigDecimal("310"), "legacy-buy", "legacy-sell"
+        )
+
+        l.isTradeSettled("legacy-trade") shouldBe true
+        l.getBalance("legacy-buyer", "TRY").availableBd() shouldBe buyerTryBeforeReplay
+        l.getBalance("legacy-buyer", "THYAO").availableBd() shouldBe buyerSharesBeforeReplay
+        l.verifyInvariant() shouldBe true
+        ds.close()
+    }
+
     test("withdraw rejects when funds are held") {
         val l = ledger()
         l.deposit("u1", "USDT", BigDecimal("50"), "d")

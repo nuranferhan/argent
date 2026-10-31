@@ -319,7 +319,7 @@ class MarketDataService(
                 bistReplayActive.set(false)
             }
         }
-        return bistReplayStatus!!
+        return bistReplayStatus ?: error("BIST replay finished without a result")
     }
 
     fun bistHistoricalReplayStatus(): BistReplayStatus? = bistReplayStatus
@@ -339,9 +339,10 @@ class MarketDataService(
             require(timestamp > 0) { "Timestamp must be Unix milliseconds or ISO-8601" }
             val symbol = columns[1].uppercase()
             val instrument = Instruments.get(symbol)
-            require(instrument?.assetClass == AssetClass.EQUITY) { "Only configured BIST equity symbols are accepted: $symbol" }
+            require(instrument != null && instrument.assetClass == AssetClass.EQUITY) { "Only configured BIST equity symbols are accepted: $symbol" }
             val price = columns[2].toBigDecimalOrNull()
-            require(price != null && price.signum() > 0 && price.scale() <= instrument!!.priceScale &&
+                ?: throw IllegalArgumentException("Invalid price precision or tick size at data row ${index + 1}")
+            require(price.signum() > 0 && price.scale() <= instrument.priceScale &&
                 price.remainder(BigDecimal(instrument.tickSize)).signum() == 0) {
                 "Invalid price precision or tick size at data row ${index + 1}"
             }
@@ -349,7 +350,7 @@ class MarketDataService(
                 val parsed = it.toBigDecimalOrNull()
                 require(parsed != null && parsed.signum() >= 0 && parsed.scale() <= 12) { "Invalid volume at data row ${index + 1}" }
             }
-            BistHistoricalRow(timestamp, symbol, price!!.stripTrailingZeros().toPlainString(), volume)
+            BistHistoricalRow(timestamp, symbol, price.stripTrailingZeros().toPlainString(), volume)
         }
         require(rows.zipWithNext().all { (a, b) -> a.timestamp <= b.timestamp }) { "CSV rows must be in ascending timestamp order" }
         return rows

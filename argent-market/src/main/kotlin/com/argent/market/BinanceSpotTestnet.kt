@@ -112,16 +112,18 @@ class BinanceSpotTestnet(
     }
 
     private suspend inline fun <reified T> signed(method: String, path: String, params: LinkedHashMap<String, String>): T {
+        val key = apiKey?.takeIf(String::isNotBlank) ?: error("Binance Spot Testnet API key is not configured")
+        val signingSecret = secret?.takeIf(String::isNotBlank) ?: error("Binance Spot Testnet secret is not configured")
         params["recvWindow"] = "5000"
         params["timestamp"] = testnetTimestamp().toString()
         val query = params.entries.joinToString("&") { (key, value) -> "$key=$value" }
-        val signature = hmacSha256(secret!!, query)
+        val signature = hmacSha256(signingSecret, query)
         val url = "$BASE_URL$path?$query&signature=$signature"
         val response = try {
             when (method) {
-                "POST" -> http.post(url) { header("X-MBX-APIKEY", apiKey!!) }
-                "DELETE" -> http.delete(url) { header("X-MBX-APIKEY", apiKey!!) }
-                else -> http.get(url) { header("X-MBX-APIKEY", apiKey!!) }
+                "POST" -> http.post(url) { header("X-MBX-APIKEY", key) }
+                "DELETE" -> http.delete(url) { header("X-MBX-APIKEY", key) }
+                else -> http.get(url) { header("X-MBX-APIKEY", key) }
             }
         } catch (cancelled: kotlinx.coroutines.CancellationException) {
             throw cancelled
@@ -168,9 +170,10 @@ class BinanceSpotTestnet(
             }
             val receivedAt = System.currentTimeMillis()
             val midpoint = startedAt + (receivedAt - startedAt) / 2
-            serverTimeOffsetMillis = serverTime - midpoint
+            val synchronizedOffsetMillis = serverTime - midpoint
+            serverTimeOffsetMillis = synchronizedOffsetMillis
             serverTimeSyncedAtNanos = System.nanoTime()
-            receivedAt + serverTimeOffsetMillis!!
+            receivedAt + synchronizedOffsetMillis
         }
     }
 

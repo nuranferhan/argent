@@ -118,7 +118,9 @@ class AuthService(
                 Tenants.insert { it[id] = PUBLIC_TENANT_ID; it[name] = PUBLIC_TENANT_NAME; it[active] = true; it[createdAt] = System.currentTimeMillis() }
             }
             // Additive migration: old refresh tokens have no tenant binding until next rotation.
-            runCatching { exec("ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64)") }
+            if (db.vendor.contains("postgres", ignoreCase = true)) {
+                exec("ALTER TABLE refresh_tokens ADD COLUMN IF NOT EXISTS tenant_id VARCHAR(64)")
+            }
             // Existing users are isolated into individual workspaces; no cross-user data is exposed by backfill.
             Users.selectAll().forEach { row ->
                 val userId = row[Users.id]

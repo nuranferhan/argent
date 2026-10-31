@@ -42,11 +42,19 @@ data class PortfolioSnapshot(
     val equity: String,
     val realizedPnl: String,
     val unrealizedPnl: String,
-    val marginUsed: String,
-    val marginRatio: String,
     val riskScore: Int,
-    val marginCall: Boolean,
-    val valuations: List<PortfolioValuation> = emptyList()
+    val valuations: List<PortfolioValuation> = emptyList(),
+    val usdValuation: PortfolioUsdValuation? = null
+)
+
+@Serializable
+data class PortfolioUsdValuation(
+    val equity: String,
+    val realizedPnl: String,
+    val unrealizedPnl: String,
+    val grossExposure: String,
+    val complete: Boolean,
+    val rateDate: String
 )
 
 @Serializable
@@ -56,8 +64,6 @@ data class PortfolioValuation(
     val realizedPnl: String,
     val unrealizedPnl: String,
     val grossExposure: String,
-    val marginUsed: String,
-    val marginRatio: String,
     val priceComplete: Boolean,
     val pnlComplete: Boolean
 )

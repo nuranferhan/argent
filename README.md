@@ -120,6 +120,8 @@ Android APK: `.\scripts\package-android.ps1`
 
 Gateway yerel adresi `http://127.0.0.1:8080`; Android emülatörü `http://10.0.2.2:8080` kullanır.
 
+Linux/macOS için Bash karşılıkları `start.sh` ve `scripts/*.sh` altında bulunur. Örneğin `./scripts/start.sh`, `./scripts/start-terminal.sh`, `./scripts/package-android.sh` ve `./scripts/verify.sh` kullanılabilir. PostgreSQL entegrasyon, backup/restore ve yerel health kontrolü için sırasıyla `scripts/test-postgres-integration.sh`, `scripts/verify-db-backup-restore.sh` ve `scripts/verify-local-release.sh` vardır. Yerel PostgreSQL işlemleri Docker Compose gerektirir.
+
 `PUBLIC_SIGNUP_ENABLED=true` ile herkes e-posta/şifre üzerinden TRADER hesabı açabilir. Yeni hesaplara bir kez 25.000 USDT ve 500.000 TRY sanal nakit verilir; gerçek para veya çekim yoktur. Google girişi için Google Cloud OAuth istemci kimliklerini `.env` içindeki `GOOGLE_WEB_CLIENT_ID` (Android) ve `GOOGLE_DESKTOP_CLIENT_ID` (masaüstü) alanlarına girin. Admin davet akışı ayrıca korunur. Sunucuyu dış kullanıcılara açmak için `.env` içinde `ARGENT_PUBLISH_HOST=0.0.0.0` ayarlanmalı ve gateway HTTPS kullanan bir ters vekil arkasında yayınlanmalıdır; varsayılan ayar yalnızca yerel bilgisayara erişim verir.
 
 ## Eşleştirme + ledger çekirdeği

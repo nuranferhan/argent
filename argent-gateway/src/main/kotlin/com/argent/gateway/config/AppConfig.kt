@@ -24,7 +24,9 @@ data class AppConfig(
     val binanceSpotTestnetSecret: String?,
     val publicSignupEnabled: Boolean = true,
     val googleWebClientId: String? = null,
-    val googleDesktopClientId: String? = null
+    val googleDesktopClientId: String? = null,
+    val trustedProxyCidrs: List<String> = emptyList(),
+    val observabilityToken: String? = null
 ) {
     val isDev: Boolean get() = env == "dev"
     val googleOAuthClientIds: Set<String> get() = setOfNotNull(googleWebClientId, googleDesktopClientId)
@@ -35,8 +37,8 @@ data class AppConfig(
             require(env in setOf("dev", "test", "staging", "prod", "production")) {
                 "ARGENT_ENV must be one of: dev, test, staging, prod, production"
             }
-            val jwt = System.getenv("JWT_SECRET")
-                ?: if (env == "dev") "argent-dev-secret-change-me-in-prod-32chars"
+            val jwt = System.getenv("JWT_SECRET")?.takeIf(String::isNotBlank)
+                ?: if (env == "dev") java.util.UUID.randomUUID().toString() + java.util.UUID.randomUUID().toString()
                 else error("JWT_SECRET environment variable is required (min 32 chars)")
             require(jwt.length >= 32 && jwt.none(Char::isWhitespace)) { "JWT_SECRET must be at least 32 non-whitespace characters" }
             val dbPass = System.getenv("DB_PASS") ?: "argent"
@@ -63,6 +65,7 @@ data class AppConfig(
                     "Production GRAFANA_ADMIN_PASSWORD must be a unique secret of at least 24 characters"
                 }
                 require(configuredCorsHosts != null && corsHosts.isNotEmpty()) { "Production ARGENT_CORS_HOSTS must be set explicitly" }
+                require(System.getenv("OBSERVABILITY_TOKEN").orEmpty().length >= 32) { "Production OBSERVABILITY_TOKEN must be at least 32 characters" }
                 require((bootstrapEmail == null) == (bootstrapPassword == null)) {
                     "Set both BOOTSTRAP_ADMIN_EMAIL and BOOTSTRAP_ADMIN_PASSWORD, or neither"
                 }
@@ -123,7 +126,9 @@ data class AppConfig(
                 publicSignupEnabled = (System.getenv("PUBLIC_SIGNUP_ENABLED") ?: "true").toBooleanStrictOrNull()
                     ?: error("PUBLIC_SIGNUP_ENABLED must be true or false"),
                 googleWebClientId = System.getenv("GOOGLE_WEB_CLIENT_ID")?.takeIf(String::isNotBlank),
-                googleDesktopClientId = System.getenv("GOOGLE_DESKTOP_CLIENT_ID")?.takeIf(String::isNotBlank)
+                googleDesktopClientId = System.getenv("GOOGLE_DESKTOP_CLIENT_ID")?.takeIf(String::isNotBlank),
+                trustedProxyCidrs = System.getenv("TRUSTED_PROXY_CIDRS").orEmpty().split(",").map(String::trim).filter(String::isNotBlank),
+                observabilityToken = System.getenv("OBSERVABILITY_TOKEN")?.takeIf(String::isNotBlank)
             )
         }
 

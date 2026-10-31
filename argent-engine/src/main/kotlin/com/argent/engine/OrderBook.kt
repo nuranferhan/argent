@@ -38,9 +38,7 @@ class OrderBook(val symbol: String) {
         }
 
         val oppositeBook = if (order.side == OrderSide.BUY) asks else bids
-        val crossesOwnLiquidity = oppositeBook.entries
-            .takeWhile { priceCrosses(order.side, limitPrice, it.key) }
-            .any { (_, queue) -> queue.any { it.userId == order.userId && it.remainingBd().signum() > 0 } }
+        val crossesOwnLiquidity = wouldTradeWithOwnOrder(oppositeBook, order, limitPrice)
         if (crossesOwnLiquidity) {
             return MatchResult(
                 trades = emptyList(),
@@ -240,6 +238,26 @@ class OrderBook(val symbol: String) {
 
     private fun priceCrosses(side: OrderSide, limit: BigDecimal, resting: BigDecimal): Boolean =
         if (side == OrderSide.BUY) resting <= limit else resting >= limit
+
+    /** Respect price-time priority: reject only when an own resting order would actually be reached. */
+    private fun wouldTradeWithOwnOrder(
+        book: ConcurrentSkipListMap<BigDecimal, ArrayDeque<Order>>,
+        incoming: Order,
+        limitPrice: BigDecimal
+    ): Boolean {
+        var remaining = incoming.quantityBd()
+        for ((price, queue) in book) {
+            if (!priceCrosses(incoming.side, limitPrice, price)) break
+            for (resting in queue) {
+                val available = resting.remainingBd().max(BigDecimal.ZERO)
+                if (available.signum() == 0) continue
+                if (resting.userId == incoming.userId) return true
+                remaining -= available
+                if (remaining.signum() <= 0) return false
+            }
+        }
+        return false
+    }
 
     private fun deterministicTradeId(takerId: String, makerId: String, filledSoFar: BigDecimal): String =
         UUID.nameUUIDFromBytes("$takerId|$makerId|${filledSoFar.toPlainString()}".toByteArray()).toString()

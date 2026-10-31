@@ -125,4 +125,15 @@ class OrderBookTest : FunSpec({
         book.bestAsk() shouldBe BigDecimal("100")
         book.bestBid() shouldBe null
     }
+
+    test("self-trade guard allows a fully fillable earlier foreign order before own liquidity") {
+        val book = OrderBook("GARAN")
+        book.match(Order(userId = "other", symbol = "GARAN", side = OrderSide.SELL, type = OrderType.LIMIT, price = "100", quantity = "1"))
+        val own = book.match(Order(userId = "me", symbol = "GARAN", side = OrderSide.SELL, type = OrderType.LIMIT, price = "100", quantity = "1"))
+        val result = book.match(Order(userId = "me", symbol = "GARAN", side = OrderSide.BUY, type = OrderType.LIMIT, price = "100", quantity = "1"))
+        result.trades.size shouldBe 1
+        result.trades.single().sellUserId shouldBe "other"
+        own.order.status shouldBe OrderStatus.ACCEPTED
+        book.snapshotOrders().single().userId shouldBe "me"
+    }
 })

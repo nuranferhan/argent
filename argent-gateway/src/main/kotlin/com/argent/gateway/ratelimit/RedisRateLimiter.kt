@@ -2,6 +2,7 @@ package com.argent.gateway.ratelimit
 
 import org.slf4j.LoggerFactory
 import redis.clients.jedis.JedisPooled
+import java.util.concurrent.ConcurrentHashMap
 
 class RedisRateLimiter(
     private val redisUrl: String,
@@ -9,10 +10,12 @@ class RedisRateLimiter(
     private val windowSeconds: Long = 60
 ) {
     private val log = LoggerFactory.getLogger(RedisRateLimiter::class.java)
+    private data class LocalBucket(var startedAtMillis: Long, var count: Int)
+    private val localBuckets = ConcurrentHashMap<String, LocalBucket>()
     private val jedis: JedisPooled? = try {
         JedisPooled(java.net.URI(redisUrl)).also { it.ping() }
     } catch (e: Exception) {
-        log.warn("Redis unavailable, rate-limit disabled: {}", e.message)
+        log.warn("Redis unavailable; using process-local rate-limit fallback: {}", e.message)
         null
     }
 
@@ -20,7 +23,8 @@ class RedisRateLimiter(
         val client = jedis ?: return false
         return try {
             client.ping() == "PONG"
-        } catch (_: Exception) {
+        } catch (failure: Exception) {
+            log.warn("Redis health check failed: {}", failure.message)
             false
         }
     }
@@ -28,7 +32,7 @@ class RedisRateLimiter(
     fun allow(key: String, requestLimit: Int = limit, requestWindowSeconds: Long = windowSeconds): Boolean {
         require(requestLimit > 0)
         require(requestWindowSeconds > 0)
-        val client = jedis ?: return false
+        val client = jedis ?: return allowLocal(key, requestLimit, requestWindowSeconds)
         return try {
             val redisKey = "rl:$key"
             val count = client.eval(
@@ -38,9 +42,22 @@ class RedisRateLimiter(
             ) as Number
             count.toLong() <= requestLimit
         } catch (e: Exception) {
-            log.debug("Rate limit check failed: {}", e.message)
-            false
+            log.warn("Redis rate-limit check failed; using process-local fallback: {}", e.message)
+            allowLocal(key, requestLimit, requestWindowSeconds)
         }
+    }
+
+    private fun allowLocal(key: String, requestLimit: Int, requestWindowSeconds: Long): Boolean {
+        val now = System.currentTimeMillis()
+        val windowMillis = requestWindowSeconds * 1_000L
+        val bucket = localBuckets.compute(key) { _, current ->
+            if (current == null || now - current.startedAtMillis >= windowMillis) LocalBucket(now, 1)
+            else current.apply { count++ }
+        } ?: return true
+        if (localBuckets.size > 10_000) {
+            localBuckets.entries.removeIf { now - it.value.startedAtMillis > windowMillis * 2 }
+        }
+        return bucket.count <= requestLimit
     }
 
     fun close() {

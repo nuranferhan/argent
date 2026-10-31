@@ -48,9 +48,7 @@ class TradingService(
                 val sameRequest = existing.symbol == symbol &&
                     existing.side.name == req.side.uppercase() &&
                     existing.type.name == req.type.uppercase() &&
-                    ((existing.price == null && req.price == null) || runCatching {
-                        BigDecimal(existing.price!!).compareTo(BigDecimal(req.price!!)) == 0
-                    }.getOrDefault(false)) &&
+                    pricesMatch(existing.price, req.price) &&
                     runCatching { existing.quantityBd().compareTo(BigDecimal(req.quantity)) == 0 }.getOrDefault(false)
                 require(sameRequest) { "clientOrderId is already used for a different order" }
                 return OrderResultResponse(
@@ -93,8 +91,8 @@ class TradingService(
                 trades = emptyList()
             )
         }
-        val asset = check.requiredAsset!!
-        val amount = check.requiredAmount!!
+        val asset = check.requiredAsset ?: error("Allowed risk check did not specify a reserve asset")
+        val amount = check.requiredAmount ?: error("Allowed risk check did not specify a reserve amount")
         val held = try {
             ledger.hold(userId, asset, amount, order.id)
         } catch (failure: Exception) {
@@ -127,7 +125,7 @@ class TradingService(
 
         val result = try {
             val matchingOrder = if (order.type == OrderType.MARKET && order.side == com.argent.common.domain.OrderSide.BUY) {
-                order.copy(price = risk.marketBuyLimit(markPrice!!).toPlainString())
+                order.copy(price = risk.marketBuyLimit(markPrice ?: error("Market buy passed risk check without a mark price")).toPlainString())
             } else order
             engine.submit(matchingOrder)
         } catch (e: Exception) {
@@ -164,6 +162,13 @@ class TradingService(
         )
     }
 
+    private fun pricesMatch(existing: String?, requested: String?): Boolean {
+        if (existing == null || requested == null) return existing == requested
+        val existingValue = existing.toBigDecimalOrNull() ?: return false
+        val requestedValue = requested.toBigDecimalOrNull() ?: return false
+        return existingValue.compareTo(requestedValue) == 0
+    }
+
     suspend fun cancel(userId: String, orderId: String, symbol: String): Boolean {
         val existing = orders.findById(orderId) ?: return false
         if (existing.userId != userId) return false
@@ -176,7 +181,18 @@ class TradingService(
     fun recoverUnsettled(events: List<com.argent.common.events.TradeExecuted>) {
         events.forEach { event ->
             log.info("Replaying settlement for trade {}", event.trade.id)
-            persistAndSettle(event.trade)
+            try {
+                persistAndSettle(event.trade)
+            } catch (failure: IllegalStateException) {
+                // Old databases may contain a trade row whose matching order was
+                // cancelled and whose settlement never committed. Do not let one
+                // orphan prevent the gateway from serving healthy accounts.
+                if (failure.message?.startsWith("Missing funds hold for order ") != true) throw failure
+                log.error(
+                    "Skipping orphaned legacy trade during settlement recovery tradeId={} buyOrderId={} sellOrderId={}: {}",
+                    event.trade.id, event.trade.buyOrderId, event.trade.sellOrderId, failure.message
+                )
+            }
         }
     }
 

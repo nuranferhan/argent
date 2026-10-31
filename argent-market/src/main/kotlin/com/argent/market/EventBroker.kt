@@ -20,8 +20,9 @@ class EventBroker(
         val url = amqpUrl ?: return
         try {
             val factory = ConnectionFactory().apply { setUri(url) }
-            connection = factory.newConnection("argent-gateway")
-            channel = connection!!.createChannel().also {
+            val openedConnection = factory.newConnection("argent-gateway")
+            connection = openedConnection
+            channel = openedConnection.createChannel().also {
                 it.exchangeDeclare("argent.events", "topic", true)
             }
             log.info("RabbitMQ event broker connected")
@@ -30,14 +31,18 @@ class EventBroker(
         }
     }
 
-    fun subscribe(listener: (DomainEvent) -> Unit) {
+    fun subscribe(listener: (DomainEvent) -> Unit): AutoCloseable {
         listeners += listener
+        return AutoCloseable { listeners.remove(listener) }
     }
 
     fun isConnected(): Boolean = connection?.isOpen == true && channel?.isOpen == true
 
     fun publish(event: DomainEvent) {
-        listeners.forEach { runCatching { it(event) } }
+        listeners.forEach { listener ->
+            runCatching { listener(event) }
+                .onFailure { log.warn("In-process event listener failed for {}", event::class.simpleName, it) }
+        }
         val ch = channel ?: return
         runCatching {
             val routing = event::class.simpleName ?: "event"

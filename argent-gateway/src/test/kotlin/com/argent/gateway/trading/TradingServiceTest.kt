@@ -1,6 +1,8 @@
 package com.argent.gateway.trading
 
 import com.argent.engine.MatchingEngine
+import com.argent.common.domain.Trade
+import com.argent.common.events.TradeExecuted
 import com.argent.gateway.api.PlaceOrderRequest
 import com.argent.gateway.order.OrderRepository
 import com.argent.ledger.LedgerService
@@ -72,6 +74,26 @@ class TradingServiceTest : FunSpec({
         )
         result.accepted shouldBe false
         result.status shouldBe "REJECTED"
+        engine.shutdown()
+    }
+
+    test("recovery skips a legacy trade whose order hold was already removed") {
+        val (trading, _, engine) = harness()
+        val orphan = Trade(
+            id = "orphan-trade",
+            symbol = "THYAO",
+            price = "310",
+            quantity = "1",
+            buyOrderId = "missing-buy-hold",
+            sellOrderId = "missing-sell-hold",
+            buyUserId = "legacy-buyer",
+            sellUserId = "legacy-seller",
+            makerOrderId = "missing-sell-hold",
+            takerOrderId = "missing-buy-hold"
+        )
+
+        trading.recoverUnsettled(listOf(TradeExecuted(aggregateId = "THYAO", trade = orphan)))
+
         engine.shutdown()
     }
 })

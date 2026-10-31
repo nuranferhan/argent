@@ -73,6 +73,17 @@ class RiskServiceTest : FunSpec({
         ledger.settleTrade("t", "THYAO", "u", "c", "THYAO", "TRY", BigDecimal("10"), BigDecimal("310"), "b", "s1")
         val snap = risk.portfolio("u", mapOf("THYAO" to BigDecimal("310")))
         snap.riskScore shouldBe 100
-        snap.marginCall shouldBe false
+    }
+
+    test("USD portfolio view uses supplied reference conversion and marks missing currencies partial") {
+        val (risk, ledger) = risk()
+        ledger.deposit("u", "TRY", BigDecimal("10000"), "try-cash")
+        val converted = risk.portfolio("u", emptyMap(), mapOf("USD" to BigDecimal.ONE, "TRY" to BigDecimal("0.02")), "2026-10-30")
+        converted.usdValuation?.equity shouldBe "200"
+        converted.usdValuation?.complete shouldBe true
+        converted.usdValuation?.rateDate shouldBe "2026-10-30"
+
+        val partial = risk.portfolio("u", emptyMap(), mapOf("USD" to BigDecimal.ONE), "unavailable")
+        partial.usdValuation?.complete shouldBe false
     }
 })

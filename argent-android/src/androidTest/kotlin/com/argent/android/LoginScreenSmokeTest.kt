@@ -17,6 +17,6 @@ class LoginScreenSmokeTest {
     fun loginScreenShowsBrandAndGuestMarketEntry() {
         compose.onNodeWithText("ARGENT").assertIsDisplayed()
         compose.onNodeWithText("Google ile devam et").assertIsDisplayed()
-        compose.onNodeWithText("Misafir olarak piyasaları izle").assertIsDisplayed()
+        compose.onNodeWithText("Misafir olarak giriş yap").assertIsDisplayed()
     }
 }

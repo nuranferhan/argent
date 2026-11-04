@@ -1,9 +1,9 @@
-FROM eclipse-temurin:21-jdk-alpine@sha256:b78a1d385da875588e21207f07dddf9a1418849971ae857fb24c8f3a7d441a72 AS build
+FROM eclipse-temurin:25-jdk-alpine@sha256:425f0b733cb23843bd78dbe5552513976d0cf12b9722752c48a5161cf5cd2f32 AS build
 WORKDIR /src
 COPY . .
 RUN chmod +x gradlew && ./gradlew :argent-gateway:installDist --no-daemon
 
-FROM eclipse-temurin:21-jre-alpine@sha256:82cf3d9ccbe1ed46252008d51b2f2329e6b9e8a2f4394c4bebefc3ea7f4b1372
+FROM eclipse-temurin:25-jre-alpine@sha256:56f273059de6b13a6b49fe0ded691ed2d0399bbee76156a8f2d385f7524a3d43
 WORKDIR /app
 COPY --from=build --chown=10001:10001 /src/argent-gateway/build/install/argent-gateway /app
 ENV ARGENT_BIND_HOST=0.0.0.0

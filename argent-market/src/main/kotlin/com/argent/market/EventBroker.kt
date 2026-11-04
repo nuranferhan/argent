@@ -9,7 +9,7 @@ import org.slf4j.LoggerFactory
 import java.util.concurrent.CopyOnWriteArrayList
 
 class EventBroker(
-    private val amqpUrl: String? = System.getenv("RABBITMQ_URL")
+    private val amqpUrl: String? = System.getenv("RABBITMQ_URL"),
 ) {
     private val log = LoggerFactory.getLogger(EventBroker::class.java)
     private val listeners = CopyOnWriteArrayList<(DomainEvent) -> Unit>()
@@ -22,9 +22,10 @@ class EventBroker(
             val factory = ConnectionFactory().apply { setUri(url) }
             val openedConnection = factory.newConnection("argent-gateway")
             connection = openedConnection
-            channel = openedConnection.createChannel().also {
-                it.exchangeDeclare("argent.events", "topic", true)
-            }
+            channel =
+                openedConnection.createChannel().also {
+                    it.exchangeDeclare("argent.events", "topic", true)
+                }
             log.info("RabbitMQ event broker connected")
         } catch (e: Exception) {
             log.warn("RabbitMQ unavailable, continuing in-process only: {}", e.message)
@@ -50,7 +51,7 @@ class EventBroker(
                 "argent.events",
                 routing,
                 null,
-                EventCodec.encode(event).toByteArray(Charsets.UTF_8)
+                EventCodec.encode(event).toByteArray(Charsets.UTF_8),
             )
         }.onFailure { log.debug("AMQP publish skipped: {}", it.message) }
     }

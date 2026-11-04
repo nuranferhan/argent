@@ -6,7 +6,10 @@ import java.net.InetAddress
 class ClientAddressResolver(private val trustedProxyCidrs: List<String>) {
     private val trustedRanges = trustedProxyCidrs.mapNotNull(::parseRange)
 
-    fun resolve(remoteAddress: String, forwardedFor: String?): String {
+    fun resolve(
+        remoteAddress: String,
+        forwardedFor: String?,
+    ): String {
         val remote = parseAddress(remoteAddress) ?: return remoteAddress
         if (trustedRanges.none { it.contains(remote.address) }) return remoteAddress
         val chain = forwardedFor.orEmpty().split(',').mapNotNull { parseAddress(it.trim()) }

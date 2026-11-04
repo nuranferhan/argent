@@ -1,0 +1,31 @@
+ALTER TABLE instrument_catalog ADD COLUMN reference_price VARCHAR(64);
+
+UPDATE instrument_catalog SET reference_price = CASE symbol
+    WHEN 'THYAO' THEN '312.50'
+    WHEN 'GARAN' THEN '128.40'
+    WHEN 'ASELS' THEN '98.70'
+    WHEN 'EREGL' THEN '54.20'
+    WHEN 'SISE' THEN '48.15'
+    WHEN 'BTCUSDT' THEN '65000'
+    WHEN 'ETHUSDT' THEN '3200'
+    WHEN 'SOLUSDT' THEN '150'
+    WHEN 'AAPL' THEN '347.00'
+    WHEN 'MSFT' THEN '524.00'
+    WHEN 'NVDA' THEN '211.00'
+    WHEN 'AMZN' THEN '248.00'
+    WHEN 'GOOGL' THEN '320.00'
+    WHEN 'META' THEN '643.00'
+    WHEN 'TSLA' THEN '372.00'
+    WHEN 'SPY' THEN '680.00'
+    WHEN 'QQQ' THEN '590.00'
+    WHEN 'VTI' THEN '340.00'
+    WHEN 'AFT' THEN '0.0825'
+    WHEN 'TI2' THEN '4.1570'
+    WHEN 'AAPL-20261218-C-350' THEN '18.50'
+    WHEN 'AAPL-20261218-P-330' THEN '11.25'
+    WHEN 'XU030-202612' THEN '12500.00'
+    ELSE NULL
+END;
+
+ALTER TABLE instrument_catalog ADD CONSTRAINT instrument_reference_price_positive
+    CHECK (reference_price IS NULL OR CAST(reference_price AS DECIMAL(38, 18)) > 0);

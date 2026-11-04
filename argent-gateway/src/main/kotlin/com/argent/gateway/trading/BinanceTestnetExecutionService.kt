@@ -7,6 +7,8 @@ import com.argent.market.BinanceSpotTestnet
 import com.argent.market.BinanceTestnetException
 import com.argent.market.TestnetOrder
 import com.argent.market.TestnetOrderRequest
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.jetbrains.exposed.sql.Database
 import org.jetbrains.exposed.sql.SchemaUtils
 import org.jetbrains.exposed.sql.Table
@@ -16,8 +18,6 @@ import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.update
 import org.slf4j.LoggerFactory
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import java.math.BigDecimal
 import java.math.RoundingMode
 import java.util.UUID
@@ -27,7 +27,7 @@ import java.util.concurrent.ConcurrentHashMap
 class BinanceTestnetExecutionService(
     database: Database,
     private val ledger: LedgerService,
-    private val exchange: BinanceSpotTestnet
+    private val exchange: BinanceSpotTestnet,
 ) {
     private val store = BinanceTestnetOrderStore(database)
     private val log = LoggerFactory.getLogger(BinanceTestnetExecutionService::class.java)
@@ -35,7 +35,10 @@ class BinanceTestnetExecutionService(
 
     fun initSchema() = store.initSchema()
 
-    suspend fun place(accountId: String, request: TestnetOrderRequest): TestnetOrder {
+    suspend fun place(
+        accountId: String,
+        request: TestnetOrderRequest,
+    ): TestnetOrder {
         val normalized = validate(request)
         val clientId = normalized.clientOrderId ?: "ag-${UUID.randomUUID().toString().replace("-", "")}".take(36)
         val req = normalized.copy(clientOrderId = clientId)
@@ -44,8 +47,9 @@ class BinanceTestnetExecutionService(
             require(existing.accountId == accountId && existing.matches(req)) {
                 "clientOrderId is already used for a different testnet order"
             }
-            val remote = existing.exchangeOrderId?.let { exchange.getOrder(existing.symbol, it) }
-                ?: exchange.getOrderByClientOrderId(existing.symbol, existing.clientOrderId)
+            val remote =
+                existing.exchangeOrderId?.let { exchange.getOrder(existing.symbol, it) }
+                    ?: exchange.getOrderByClientOrderId(existing.symbol, existing.clientOrderId)
             store.acknowledge(existing.clientOrderId, remote.orderId, remote.status)
             return sync(existing.copy(exchangeOrderId = remote.orderId), remote)
         }
@@ -53,21 +57,22 @@ class BinanceTestnetExecutionService(
         val instrument = Instruments.require(req.symbol)
         val holdId = "bt-${UUID.randomUUID()}"
         val (holdAsset, holdAmount) = reserveAmount(accountId, instrument, req)
-        val tracked = TrackedTestnetOrder(
-            clientOrderId = clientId,
-            accountId = accountId,
-            symbol = req.symbol,
-            side = req.side,
-            type = req.type,
-            quantity = req.quantity,
-            price = req.price,
-            timeInForce = req.timeInForce,
-            holdId = holdId,
-            holdAsset = holdAsset,
-            holdAmount = holdAmount,
-            exchangeOrderId = null,
-            status = "PREPARED"
-        )
+        val tracked =
+            TrackedTestnetOrder(
+                clientOrderId = clientId,
+                accountId = accountId,
+                symbol = req.symbol,
+                side = req.side,
+                type = req.type,
+                quantity = req.quantity,
+                price = req.price,
+                timeInForce = req.timeInForce,
+                holdId = holdId,
+                holdAsset = holdAsset,
+                holdAmount = holdAmount,
+                exchangeOrderId = null,
+                status = "PREPARED",
+            )
         store.create(tracked)
         if (!ledger.hold(accountId, holdAsset, holdAmount, holdId)) {
             store.setStatus(clientId, "REJECTED")
@@ -75,34 +80,43 @@ class BinanceTestnetExecutionService(
         }
         store.setStatus(clientId, "SUBMITTING")
 
-        val remote = try {
-            exchange.placeOrder(req)
-        } catch (failure: BinanceTestnetException) {
-            if (failure.upstreamStatus in 400..499) {
-                store.setStatus(clientId, "REJECTED")
-                ledger.releaseRemainingHold(holdId)
-            } else {
-                // A timeout can happen after Binance accepted the order. Keep the
-                // hold and client id so polling can recover the exchange order.
+        val remote =
+            try {
+                exchange.placeOrder(req)
+            } catch (failure: BinanceTestnetException) {
+                if (failure.upstreamStatus in 400..499) {
+                    store.setStatus(clientId, "REJECTED")
+                    ledger.releaseRemainingHold(holdId)
+                } else {
+                    // A timeout can happen after Binance accepted the order. Keep the
+                    // hold and client id so polling can recover the exchange order.
+                    store.setStatus(clientId, "SUBMISSION_UNKNOWN")
+                }
+                throw failure
+            } catch (failure: Exception) {
                 store.setStatus(clientId, "SUBMISSION_UNKNOWN")
+                throw failure
             }
-            throw failure
-        } catch (failure: Exception) {
-            store.setStatus(clientId, "SUBMISSION_UNKNOWN")
-            throw failure
-        }
         store.acknowledge(clientId, remote.orderId, remote.status)
         return sync(tracked.copy(exchangeOrderId = remote.orderId), remote)
     }
 
-    suspend fun get(accountId: String, symbol: String, orderId: Long): TestnetOrder {
+    suspend fun get(
+        accountId: String,
+        symbol: String,
+        orderId: Long,
+    ): TestnetOrder {
         val tracked = store.find(accountId, symbol.uppercase(), orderId)
         if (tracked == null) return exchange.getOrder(symbol, orderId)
         val remote = exchange.getOrder(symbol, orderId)
         return sync(tracked, remote)
     }
 
-    suspend fun cancel(accountId: String, symbol: String, orderId: Long): TestnetOrder {
+    suspend fun cancel(
+        accountId: String,
+        symbol: String,
+        orderId: Long,
+    ): TestnetOrder {
         val tracked = store.find(accountId, symbol.uppercase(), orderId)
         if (tracked == null) return exchange.cancelOrder(symbol, orderId)
         val remote = exchange.cancelOrder(symbol, orderId)
@@ -113,20 +127,31 @@ class BinanceTestnetExecutionService(
     suspend fun syncActive() {
         store.active().forEach { tracked ->
             runCatching {
-                val remote = tracked.exchangeOrderId?.let { exchange.getOrder(tracked.symbol, it) }
-                    ?: exchange.getOrderByClientOrderId(tracked.symbol, tracked.clientOrderId)
+                val remote =
+                    tracked.exchangeOrderId?.let { exchange.getOrder(tracked.symbol, it) }
+                        ?: exchange.getOrderByClientOrderId(tracked.symbol, tracked.clientOrderId)
                 store.acknowledge(tracked.clientOrderId, remote.orderId, remote.status)
                 sync(tracked.copy(exchangeOrderId = remote.orderId), remote)
             }.onFailure { failure ->
-                log.debug("Testnet order sync deferred clientOrderId={} reason={}", tracked.clientOrderId, failure.message)
+                log.debug(
+                    "Testnet order sync deferred clientOrderId={} reason={}",
+                    tracked.clientOrderId,
+                    failure.message,
+                )
             }
         }
     }
 
-    private suspend fun sync(tracked: TrackedTestnetOrder, remote: TestnetOrder): TestnetOrder =
+    private suspend fun sync(
+        tracked: TrackedTestnetOrder,
+        remote: TestnetOrder,
+    ): TestnetOrder =
         orderLocks.computeIfAbsent(tracked.clientOrderId) { Mutex() }.withLock { syncLocked(tracked, remote) }
 
-    private suspend fun syncLocked(tracked: TrackedTestnetOrder, remote: TestnetOrder): TestnetOrder {
+    private suspend fun syncLocked(
+        tracked: TrackedTestnetOrder,
+        remote: TestnetOrder,
+    ): TestnetOrder {
         var syncOk = true
         try {
             val instrument = Instruments.require(tracked.symbol)
@@ -156,13 +181,17 @@ class BinanceTestnetExecutionService(
                     quantity = fill.qty.toBigDecimal(),
                     quoteQuantity = fill.quoteQty.toBigDecimal(),
                     commission = fill.commission.toBigDecimal(),
-                    commissionAsset = fill.commissionAsset
+                    commissionAsset = fill.commissionAsset,
                 )
             }
         } catch (failure: Exception) {
             syncOk = false
             store.setStatus(tracked.clientOrderId, "SETTLEMENT_REVIEW")
-            log.error("Binance Testnet fill could not be mirrored to ARGENT ledger clientOrderId={}", tracked.clientOrderId, failure)
+            log.error(
+                "Binance Testnet fill could not be mirrored to ARGENT ledger clientOrderId={}",
+                tracked.clientOrderId,
+                failure,
+            )
         }
         if (syncOk) {
             store.setStatus(tracked.clientOrderId, remote.status)
@@ -174,13 +203,16 @@ class BinanceTestnetExecutionService(
     private fun validate(request: TestnetOrderRequest): TestnetOrderRequest {
         val symbol = request.symbol.uppercase()
         val instrument = Instruments.require(symbol)
-        require(instrument.assetClass == AssetClass.CRYPTO) { "Only supported crypto instruments can use Binance Spot Testnet" }
+        require(
+            instrument.assetClass == AssetClass.CRYPTO,
+        ) { "Only supported crypto instruments can use Binance Spot Testnet" }
         val side = request.side.uppercase()
         require(side in setOf("BUY", "SELL")) { "side must be BUY or SELL" }
         val type = request.type.uppercase()
         require(type in setOf("LIMIT", "MARKET")) { "type must be LIMIT or MARKET" }
-        val quantity = request.quantity.toBigDecimalOrNull()?.stripTrailingZeros()
-            ?: throw IllegalArgumentException("quantity must be decimal")
+        val quantity =
+            request.quantity.toBigDecimalOrNull()?.stripTrailingZeros()
+                ?: throw IllegalArgumentException("quantity must be decimal")
         require(quantity > BigDecimal.ZERO && quantity.remainder(instrument.lotSize.toBigDecimal()).signum() == 0) {
             "quantity must be positive and match ${instrument.symbol} lot size ${instrument.lotSize}"
         }
@@ -194,19 +226,32 @@ class BinanceTestnetExecutionService(
             require(request.price.isNullOrBlank()) { "price is not accepted for MARKET" }
             require(request.timeInForce.uppercase() == "GTC") { "timeInForce is only supported for LIMIT" }
         }
-        return request.copy(symbol = symbol, side = side, type = type, quantity = quantity.toPlainString(), timeInForce = request.timeInForce.uppercase())
+        return request.copy(
+            symbol = symbol,
+            side = side,
+            type = type,
+            quantity = quantity.toPlainString(),
+            timeInForce = request.timeInForce.uppercase(),
+        )
     }
 
-    private fun reserveAmount(accountId: String, instrument: com.argent.common.domain.Instrument, request: TestnetOrderRequest): Pair<String, BigDecimal> {
+    private fun reserveAmount(
+        accountId: String,
+        instrument: com.argent.common.domain.Instrument,
+        request: TestnetOrderRequest,
+    ): Pair<String, BigDecimal> {
         val feeBuffer = BigDecimal("1.01")
         return when {
             request.side == "BUY" && request.type == "LIMIT" ->
-                instrument.quoteAsset to request.quantity.toBigDecimal().multiply(
-                    request.price?.toBigDecimalOrNull() ?: throw IllegalArgumentException("price is required for LIMIT")
-                ).multiply(feeBuffer)
+                instrument.quoteAsset to
+                    request.quantity.toBigDecimal().multiply(
+                        request.price?.toBigDecimalOrNull() ?: throw IllegalArgumentException("price is required for LIMIT"),
+                    ).multiply(feeBuffer)
             request.side == "BUY" -> {
                 val available = ledger.getBalance(accountId, instrument.quoteAsset).availableBd()
-                require(available > BigDecimal.ZERO) { "No available ${instrument.quoteAsset} to reserve for a market buy" }
+                require(
+                    available > BigDecimal.ZERO,
+                ) { "No available ${instrument.quoteAsset} to reserve for a market buy" }
                 instrument.quoteAsset to available
             }
             else -> instrument.baseAsset to request.quantity.toBigDecimal().multiply(feeBuffer).setScale(18, RoundingMode.UP).stripTrailingZeros()
@@ -218,8 +263,10 @@ class BinanceTestnetExecutionService(
         val requestedPrice = request.price
         return symbol == request.symbol && side == request.side && type == request.type &&
             quantity.toBigDecimal().compareTo(request.quantity.toBigDecimal()) == 0 &&
-            ((existingPrice == null && requestedPrice == null) ||
-                (existingPrice != null && requestedPrice != null && existingPrice.toBigDecimal().compareTo(requestedPrice.toBigDecimal()) == 0)) &&
+            (
+                (existingPrice == null && requestedPrice == null) ||
+                    (existingPrice != null && requestedPrice != null && existingPrice.toBigDecimal().compareTo(requestedPrice.toBigDecimal()) == 0)
+            ) &&
             timeInForce == request.timeInForce
     }
 
@@ -248,66 +295,82 @@ private class BinanceTestnetOrderStore(private val db: Database) {
 
     fun initSchema() = transaction(db) { SchemaUtils.createMissingTablesAndColumns(Orders) }
 
-    fun create(order: TrackedTestnetOrder) = transaction(db) {
-        Orders.insert {
-            it[clientOrderId] = order.clientOrderId
-            it[accountId] = order.accountId
-            it[symbol] = order.symbol
-            it[side] = order.side
-            it[type] = order.type
-            it[quantity] = order.quantity
-            it[price] = order.price
-            it[timeInForce] = order.timeInForce
-            it[holdId] = order.holdId
-            it[holdAsset] = order.holdAsset
-            it[holdAmount] = order.holdAmount
-            it[exchangeOrderId] = order.exchangeOrderId
-            it[status] = order.status
+    fun create(order: TrackedTestnetOrder) =
+        transaction(db) {
+            Orders.insert {
+                it[clientOrderId] = order.clientOrderId
+                it[accountId] = order.accountId
+                it[symbol] = order.symbol
+                it[side] = order.side
+                it[type] = order.type
+                it[quantity] = order.quantity
+                it[price] = order.price
+                it[timeInForce] = order.timeInForce
+                it[holdId] = order.holdId
+                it[holdAsset] = order.holdAsset
+                it[holdAmount] = order.holdAmount
+                it[exchangeOrderId] = order.exchangeOrderId
+                it[status] = order.status
+            }
         }
-    }
 
-    fun find(clientOrderId: String): TrackedTestnetOrder? = transaction(db) {
-        Orders.selectAll().where { Orders.clientOrderId eq clientOrderId }.firstOrNull()?.toTracked()
-    }
+    fun find(clientOrderId: String): TrackedTestnetOrder? =
+        transaction(db) {
+            Orders.selectAll().where { Orders.clientOrderId eq clientOrderId }.firstOrNull()?.toTracked()
+        }
 
-    fun find(accountId: String, symbol: String, orderId: Long): TrackedTestnetOrder? = transaction(db) {
-        Orders.selectAll().where {
-            (Orders.accountId eq accountId) and (Orders.symbol eq symbol) and (Orders.exchangeOrderId eq orderId)
-        }.firstOrNull()?.toTracked()
-    }
+    fun find(
+        accountId: String,
+        symbol: String,
+        orderId: Long,
+    ): TrackedTestnetOrder? =
+        transaction(db) {
+            Orders.selectAll().where {
+                (Orders.accountId eq accountId) and (Orders.symbol eq symbol) and (Orders.exchangeOrderId eq orderId)
+            }.firstOrNull()?.toTracked()
+        }
 
-    fun acknowledge(clientOrderId: String, orderId: Long, status: String) = transaction(db) {
+    fun acknowledge(
+        clientOrderId: String,
+        orderId: Long,
+        status: String,
+    ) = transaction(db) {
         Orders.update({ Orders.clientOrderId eq clientOrderId }) {
             it[exchangeOrderId] = orderId
             it[Orders.status] = status
         }
     }
 
-    fun setStatus(clientOrderId: String, status: String) = transaction(db) {
+    fun setStatus(
+        clientOrderId: String,
+        status: String,
+    ) = transaction(db) {
         Orders.update({ Orders.clientOrderId eq clientOrderId }) { it[Orders.status] = status }
     }
 
-    fun active(): List<TrackedTestnetOrder> = transaction(db) {
-        Orders.selectAll().where {
-            Orders.status inList listOf("PREPARED", "SUBMITTING", "SUBMISSION_UNKNOWN", "NEW", "PARTIALLY_FILLED", "SETTLEMENT_REVIEW")
-        }.map { it.toTracked() }
-    }
+    fun active(): List<TrackedTestnetOrder> =
+        transaction(db) {
+            Orders.selectAll().where {
+                Orders.status inList listOf("PREPARED", "SUBMITTING", "SUBMISSION_UNKNOWN", "NEW", "PARTIALLY_FILLED", "SETTLEMENT_REVIEW")
+            }.map { it.toTracked() }
+        }
 
-    private fun org.jetbrains.exposed.sql.ResultRow.toTracked() = TrackedTestnetOrder(
-        clientOrderId = this[Orders.clientOrderId],
-        accountId = this[Orders.accountId],
-        symbol = this[Orders.symbol],
-        side = this[Orders.side],
-        type = this[Orders.type],
-        quantity = this[Orders.quantity],
-        price = this[Orders.price],
-        timeInForce = this[Orders.timeInForce],
-        holdId = this[Orders.holdId],
-        holdAsset = this[Orders.holdAsset],
-        holdAmount = this[Orders.holdAmount],
-        exchangeOrderId = this[Orders.exchangeOrderId],
-        status = this[Orders.status]
-    )
+    private fun org.jetbrains.exposed.sql.ResultRow.toTracked() =
+        TrackedTestnetOrder(
+            clientOrderId = this[Orders.clientOrderId],
+            accountId = this[Orders.accountId],
+            symbol = this[Orders.symbol],
+            side = this[Orders.side],
+            type = this[Orders.type],
+            quantity = this[Orders.quantity],
+            price = this[Orders.price],
+            timeInForce = this[Orders.timeInForce],
+            holdId = this[Orders.holdId],
+            holdAsset = this[Orders.holdAsset],
+            holdAmount = this[Orders.holdAmount],
+            exchangeOrderId = this[Orders.exchangeOrderId],
+            status = this[Orders.status],
+        )
 }
 
 private data class TrackedTestnetOrder(
@@ -323,5 +386,5 @@ private data class TrackedTestnetOrder(
     val holdAsset: String,
     val holdAmount: BigDecimal,
     val exchangeOrderId: Long?,
-    val status: String
+    val status: String,
 )

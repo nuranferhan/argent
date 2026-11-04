@@ -32,11 +32,12 @@ class LiquidityProvider(
     private val controlStore: MarketMakerControlStore,
     private val maxQuoteNotional: BigDecimal = System.getenv("MM_MAX_QUOTE_NOTIONAL")?.let(::BigDecimal) ?: BigDecimal("5000"),
     private val maxInventoryNotional: BigDecimal = System.getenv("MM_MAX_INVENTORY_NOTIONAL")?.let(::BigDecimal) ?: BigDecimal("10000000"),
-    private val maxQuoteAgeMs: Long = 10_000
+    private val maxQuoteAgeMs: Long = 10_000,
 ) {
     private val log = LoggerFactory.getLogger(LiquidityProvider::class.java)
     private val enabled = AtomicBoolean(false)
     private val controlLock = Mutex()
+
     @Volatile private var worker: Job? = null
 
     init {
@@ -58,41 +59,50 @@ class LiquidityProvider(
         launchWorker()
     }
 
-    suspend fun resume() = controlLock.withLock {
-        controlStore.setEnabled(true)
-        enabled.set(true)
-        if (worker?.isActive != true) launchWorker()
-    }
+    suspend fun resume() =
+        controlLock.withLock {
+            controlStore.setEnabled(true)
+            enabled.set(true)
+            if (worker?.isActive != true) launchWorker()
+        }
 
     private fun launchWorker() {
-        worker = scope.launch {
-            delay(1_500)
-            while (isActive) {
-                if (enabled.get()) {
-                    Instruments.all.forEach { instrument ->
-                        runCatching { quote(instrument.symbol, instrument.assetClass, instrument.priceScale) }
-                            .onFailure { log.debug("MM {}: {}", instrument.symbol, it.message) }
+        worker =
+            scope.launch {
+                delay(1_500)
+                while (isActive) {
+                    if (enabled.get()) {
+                        Instruments.all.forEach { instrument ->
+                            runCatching { quote(instrument.symbol, instrument.assetClass, instrument.priceScale) }
+                                .onFailure { log.debug("MM {}: {}", instrument.symbol, it.message) }
+                        }
                     }
+                    delay(2_500)
                 }
-                delay(2_500)
             }
-        }
     }
 
-    suspend fun killSwitch(): Int = controlLock.withLock {
-        controlStore.setEnabled(false)
-        enabled.set(false)
-        worker?.cancelAndJoin()
-        var cancelled = 0
-        orders.findActiveByUser(userId).forEach { order ->
-            if (runCatching { trading.cancel(userId, order.id, order.symbol) }.getOrDefault(false)) cancelled++
+    suspend fun killSwitch(): Int =
+        controlLock.withLock {
+            controlStore.setEnabled(false)
+            enabled.set(false)
+            worker?.cancelAndJoin()
+            var cancelled = 0
+            orders.findActiveByUser(userId).forEach { order ->
+                if (runCatching { trading.cancel(userId, order.id, order.symbol) }.getOrDefault(false)) cancelled++
+            }
+            val leftovers = orders.findActiveByUser(userId)
+            check(
+                leftovers.isEmpty(),
+            ) { "Market maker stopped but ${leftovers.size} resting orders could not be cancelled" }
+            cancelled
         }
-        val leftovers = orders.findActiveByUser(userId)
-        check(leftovers.isEmpty()) { "Market maker stopped but ${leftovers.size} resting orders could not be cancelled" }
-        cancelled
-    }
 
-    private suspend fun quote(symbol: String, assetClass: AssetClass, priceScale: Int) {
+    private suspend fun quote(
+        symbol: String,
+        assetClass: AssetClass,
+        priceScale: Int,
+    ) {
         val ticker = market.lastTicker(symbol)
         if (ticker == null) {
             // Do not leave previously quoted synthetic prices resting when a real feed is unavailable.
@@ -120,34 +130,52 @@ class LiquidityProvider(
         val strategyCap = if (assetClass != AssetClass.CRYPTO) BigDecimal("25") else BigDecimal("0.15")
         val notionalCap = maxQuoteNotional.divide(last, instrument.qtyScale + 8, RoundingMode.DOWN)
         val lot = BigDecimal(instrument.lotSize)
-        val baseQty = strategyCap.min(notionalCap)
-            .divide(lot, 0, RoundingMode.DOWN).multiply(lot)
-            .setScale(instrument.qtyScale, RoundingMode.DOWN)
+        val baseQty =
+            strategyCap.min(notionalCap)
+                .divide(lot, 0, RoundingMode.DOWN).multiply(lot)
+                .setScale(instrument.qtyScale, RoundingMode.DOWN)
         if (baseQty.signum() <= 0) return
         if (remaining.none { it.side.name == "BUY" }) {
             val currentBase = ledger.getBalance(userId, instrument.baseAsset).totalBd()
-            val openBidQty = remaining.filter { it.side.name == "BUY" }
-                .fold(BigDecimal.ZERO) { acc, order -> acc + BigDecimal(order.remainingQuantity) }
+            val openBidQty =
+                remaining.filter { it.side.name == "BUY" }
+                    .fold(BigDecimal.ZERO) { acc, order -> acc + BigDecimal(order.remainingQuantity) }
             val inventoryCap = maxInventoryNotional.divide(last, instrument.qtyScale + 8, RoundingMode.DOWN)
-            val buyQty = baseQty.min((inventoryCap - currentBase - openBidQty).max(BigDecimal.ZERO))
-                .divide(lot, 0, RoundingMode.DOWN).multiply(lot).setScale(instrument.qtyScale, RoundingMode.DOWN)
+            val buyQty =
+                baseQty.min((inventoryCap - currentBase - openBidQty).max(BigDecimal.ZERO))
+                    .divide(lot, 0, RoundingMode.DOWN).multiply(lot).setScale(instrument.qtyScale, RoundingMode.DOWN)
             if (buyQty.signum() > 0) {
-            val bid = last.multiply(BigDecimal("0.9985")).setScale(priceScale, RoundingMode.HALF_UP)
-            trading.placeOrder(
-                userId,
-                PlaceOrderRequest(symbol, "BUY", "LIMIT", bid.toPlainString(), buyQty.toPlainString(), "mm-bid-$symbol-${System.currentTimeMillis()}")
-            )
+                val bid = last.multiply(BigDecimal("0.9985")).setScale(priceScale, RoundingMode.HALF_UP)
+                trading.placeOrder(
+                    userId,
+                    PlaceOrderRequest(
+                        symbol,
+                        "BUY",
+                        "LIMIT",
+                        bid.toPlainString(),
+                        buyQty.toPlainString(),
+                        "mm-bid-$symbol-${System.currentTimeMillis()}",
+                    ),
+                )
             }
         }
         if (remaining.none { it.side.name == "SELL" }) {
             val availableBase = ledger.getBalance(userId, instrument.baseAsset).availableBd()
-            val sellQty = baseQty.min(availableBase)
-                .divide(lot, 0, RoundingMode.DOWN).multiply(lot).setScale(instrument.qtyScale, RoundingMode.DOWN)
+            val sellQty =
+                baseQty.min(availableBase)
+                    .divide(lot, 0, RoundingMode.DOWN).multiply(lot).setScale(instrument.qtyScale, RoundingMode.DOWN)
             if (sellQty.signum() <= 0) return
             val ask = last.multiply(BigDecimal("1.0015")).setScale(priceScale, RoundingMode.HALF_UP)
             trading.placeOrder(
                 userId,
-                PlaceOrderRequest(symbol, "SELL", "LIMIT", ask.toPlainString(), sellQty.toPlainString(), "mm-ask-$symbol-${System.currentTimeMillis()}")
+                PlaceOrderRequest(
+                    symbol,
+                    "SELL",
+                    "LIMIT",
+                    ask.toPlainString(),
+                    sellQty.toPlainString(),
+                    "mm-ask-$symbol-${System.currentTimeMillis()}",
+                ),
             )
         }
     }

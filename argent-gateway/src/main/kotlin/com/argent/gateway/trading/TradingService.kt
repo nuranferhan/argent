@@ -14,10 +14,10 @@ import com.argent.gateway.order.OrderRepository
 import com.argent.ledger.LedgerService
 import com.argent.market.MarketDataService
 import com.argent.risk.RiskService
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import io.micrometer.core.instrument.MeterRegistry
 import io.micrometer.core.instrument.simple.SimpleMeterRegistry
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import org.slf4j.LoggerFactory
 import java.math.BigDecimal
 import java.util.concurrent.ConcurrentHashMap
@@ -28,7 +28,7 @@ class TradingService(
     private val risk: RiskService,
     private val orders: OrderRepository,
     private val market: MarketDataService,
-    private val meters: MeterRegistry = SimpleMeterRegistry()
+    private val meters: MeterRegistry = SimpleMeterRegistry(),
 ) {
     private val accountLocks = ConcurrentHashMap<String, Mutex>()
     private val log = LoggerFactory.getLogger(TradingService::class.java)
@@ -36,45 +36,58 @@ class TradingService(
     private val rejected = meters.counter("argent_orders_rejected_total")
     private val trades = meters.counter("argent_trades_executed_total")
 
-    suspend fun <T> withAccountLock(accountId: String, action: suspend () -> T): T =
-        accountLocks.computeIfAbsent(accountId) { Mutex() }.withLock { action() }
+    suspend fun <T> withAccountLock(
+        accountId: String,
+        action: suspend () -> T,
+    ): T = accountLocks.computeIfAbsent(accountId) { Mutex() }.withLock { action() }
 
-    suspend fun placeOrder(userId: String, req: PlaceOrderRequest): OrderResultResponse {
+    suspend fun placeOrder(
+        userId: String,
+        req: PlaceOrderRequest,
+    ): OrderResultResponse {
         val symbol = req.symbol.uppercase()
         Instruments.require(symbol)
         if (!req.clientOrderId.isNullOrBlank()) {
             val existing = orders.findByClientOrderId(userId, req.clientOrderId)
             if (existing != null) {
-                val sameRequest = existing.symbol == symbol &&
-                    existing.side.name == req.side.uppercase() &&
-                    existing.type.name == req.type.uppercase() &&
-                    pricesMatch(existing.price, req.price) &&
-                    runCatching { existing.quantityBd().compareTo(BigDecimal(req.quantity)) == 0 }.getOrDefault(false)
+                val sameRequest =
+                    existing.symbol == symbol &&
+                        existing.side.name == req.side.uppercase() &&
+                        existing.type.name == req.type.uppercase() &&
+                        pricesMatch(existing.price, req.price) &&
+                        runCatching { existing.quantityBd().compareTo(BigDecimal(req.quantity)) == 0 }.getOrDefault(false)
                 require(sameRequest) { "clientOrderId is already used for a different order" }
                 return OrderResultResponse(
                     orderId = existing.id,
                     status = existing.status.name,
                     filledQuantity = existing.filledQuantity,
                     remainingQuantity = existing.remainingQuantity,
-                    accepted = existing.status in setOf(OrderStatus.ACCEPTED, OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED) ||
-                        (existing.status == OrderStatus.CANCELLED && existing.filledBd().signum() > 0),
-                    reason = if (existing.status == OrderStatus.PENDING) {
-                        "Order outcome is pending recovery; funds remain reserved"
-                    } else "idempotent replay",
-                    trades = emptyList()
+                    accepted =
+                        existing.status in setOf(OrderStatus.ACCEPTED, OrderStatus.PARTIALLY_FILLED, OrderStatus.FILLED) ||
+                            (existing.status == OrderStatus.CANCELLED && existing.filledBd().signum() > 0),
+                    reason =
+                        if (existing.status == OrderStatus.PENDING) {
+                            "Order outcome is pending recovery; funds remain reserved"
+                        } else {
+                            "idempotent replay"
+                        },
+                    trades = emptyList(),
                 )
             }
         }
 
-        val order = Order(
-            clientOrderId = req.clientOrderId,
-            userId = userId,
-            symbol = symbol,
-            side = OrderSide.valueOf(req.side.uppercase()),
-            type = OrderType.valueOf(req.type.uppercase()),
-            price = req.price,
-            quantity = req.quantity
-        )
+        Instruments.requireTradable(symbol)
+
+        val order =
+            Order(
+                clientOrderId = req.clientOrderId,
+                userId = userId,
+                symbol = symbol,
+                side = OrderSide.valueOf(req.side.uppercase()),
+                type = OrderType.valueOf(req.type.uppercase()),
+                price = req.price,
+                quantity = req.quantity,
+            )
 
         val markPrice = market.lastPrice(symbol)
         val check = risk.checkOrder(order, markPrice)
@@ -88,18 +101,19 @@ class TradingService(
                 remainingQuantity = order.quantity,
                 accepted = false,
                 reason = check.reason ?: "Risk check failed",
-                trades = emptyList()
+                trades = emptyList(),
             )
         }
         val asset = check.requiredAsset ?: error("Allowed risk check did not specify a reserve asset")
         val amount = check.requiredAmount ?: error("Allowed risk check did not specify a reserve amount")
-        val held = try {
-            ledger.hold(userId, asset, amount, order.id)
-        } catch (failure: Exception) {
-            runCatching { ledger.releaseRemainingHold(order.id) }
-                .onFailure(failure::addSuppressed)
-            throw failure
-        }
+        val held =
+            try {
+                ledger.hold(userId, asset, amount, order.id)
+            } catch (failure: Exception) {
+                runCatching { ledger.releaseRemainingHold(order.id) }
+                    .onFailure(failure::addSuppressed)
+                throw failure
+            }
         if (!held) {
             orders.save(order.copy(status = OrderStatus.REJECTED))
             rejected.increment()
@@ -110,7 +124,7 @@ class TradingService(
                 remainingQuantity = order.quantity,
                 accepted = false,
                 reason = "Insufficient available balance",
-                trades = emptyList()
+                trades = emptyList(),
             )
         }
 
@@ -123,18 +137,27 @@ class TradingService(
         }
         submitted.increment()
 
-        val result = try {
-            val matchingOrder = if (order.type == OrderType.MARKET && order.side == com.argent.common.domain.OrderSide.BUY) {
-                order.copy(price = risk.marketBuyLimit(markPrice ?: error("Market buy passed risk check without a mark price")).toPlainString())
-            } else order
-            engine.submit(matchingOrder)
-        } catch (e: Exception) {
-            log.error("Matching outcome is pending durable event replay orderId={}", order.id, e)
-            throw IllegalStateException(
-                "Order outcome is pending recovery. Its funds remain reserved; retry with the same clientOrderId after the gateway recovers.",
-                e
-            )
-        }
+        val result =
+            try {
+                val matchingOrder =
+                    if (order.type == OrderType.MARKET && order.side == com.argent.common.domain.OrderSide.BUY) {
+                        order.copy(
+                            price =
+                                risk.marketBuyLimit(
+                                    markPrice ?: error("Market buy passed risk check without a mark price"),
+                                ).toPlainString(),
+                        )
+                    } else {
+                        order
+                    }
+                engine.submit(matchingOrder)
+            } catch (e: Exception) {
+                log.error("Matching outcome is pending durable event replay orderId={}", order.id, e)
+                throw IllegalStateException(
+                    "Order outcome is pending recovery. Its funds remain reserved; retry with the same clientOrderId after the gateway recovers.",
+                    e,
+                )
+            }
 
         orders.save(result.order)
         result.trades.forEach { trade ->
@@ -142,8 +165,9 @@ class TradingService(
             trades.increment()
         }
 
-        val keepHold = result.accepted &&
-            (result.order.status == OrderStatus.ACCEPTED || result.order.status == OrderStatus.PARTIALLY_FILLED)
+        val keepHold =
+            result.accepted &&
+                (result.order.status == OrderStatus.ACCEPTED || result.order.status == OrderStatus.PARTIALLY_FILLED)
         if (!keepHold) {
             ledger.releaseRemainingHold(order.id)
         }
@@ -158,24 +182,40 @@ class TradingService(
             remainingQuantity = result.order.remainingQuantity,
             accepted = result.accepted,
             reason = result.reason ?: "",
-            trades = result.trades.map { it.toInfo() }
+            trades = result.trades.map { it.toInfo() },
         )
     }
 
-    private fun pricesMatch(existing: String?, requested: String?): Boolean {
+    private fun pricesMatch(
+        existing: String?,
+        requested: String?,
+    ): Boolean {
         if (existing == null || requested == null) return existing == requested
         val existingValue = existing.toBigDecimalOrNull() ?: return false
         val requestedValue = requested.toBigDecimalOrNull() ?: return false
         return existingValue.compareTo(requestedValue) == 0
     }
 
-    suspend fun cancel(userId: String, orderId: String, symbol: String): Boolean {
+    suspend fun cancel(
+        userId: String,
+        orderId: String,
+        symbol: String,
+    ): Boolean {
         val existing = orders.findById(orderId) ?: return false
         if (existing.userId != userId) return false
         val cancelled = engine.cancel(symbol, orderId) ?: return false
         orders.save(cancelled.copy(status = OrderStatus.CANCELLED))
         ledger.releaseRemainingHold(orderId)
         return true
+    }
+
+    suspend fun cancelNonTradableOrders(): Int {
+        val expired = orders.findActive().filterNot { Instruments.isTradable(it.symbol) }
+        var cancelled = 0
+        expired.forEach { order ->
+            if (cancel(order.userId, order.id, order.symbol)) cancelled++
+        }
+        return cancelled
     }
 
     fun recoverUnsettled(events: List<com.argent.common.events.TradeExecuted>) {
@@ -190,7 +230,10 @@ class TradingService(
                 if (failure.message?.startsWith("Missing funds hold for order ") != true) throw failure
                 log.error(
                     "Skipping orphaned legacy trade during settlement recovery tradeId={} buyOrderId={} sellOrderId={}: {}",
-                    event.trade.id, event.trade.buyOrderId, event.trade.sellOrderId, failure.message
+                    event.trade.id,
+                    event.trade.buyOrderId,
+                    event.trade.sellOrderId,
+                    failure.message,
                 )
             }
         }
@@ -209,7 +252,7 @@ class TradingService(
             quantity = trade.quantityBd(),
             price = trade.priceBd(),
             buyOrderId = trade.buyOrderId,
-            sellOrderId = trade.sellOrderId
+            sellOrderId = trade.sellOrderId,
         )
         applyMakerFill(trade)
     }
@@ -223,23 +266,24 @@ class TradingService(
             maker.copy(
                 filledQuantity = filled.stripTrailingZeros().toPlainString(),
                 remainingQuantity = remaining.stripTrailingZeros().toPlainString(),
-                status = status
-            )
+                status = status,
+            ),
         )
         if (status == OrderStatus.FILLED) {
             ledger.releaseRemainingHold(maker.id)
         }
     }
 
-    private fun Trade.toInfo() = TradeInfo(
-        id = id,
-        symbol = symbol,
-        price = price,
-        quantity = quantity,
-        buyOrderId = buyOrderId,
-        sellOrderId = sellOrderId,
-        makerOrderId = makerOrderId,
-        takerOrderId = takerOrderId,
-        executedAt = executedAt
-    )
+    private fun Trade.toInfo() =
+        TradeInfo(
+            id = id,
+            symbol = symbol,
+            price = price,
+            quantity = quantity,
+            buyOrderId = buyOrderId,
+            sellOrderId = sellOrderId,
+            makerOrderId = makerOrderId,
+            takerOrderId = takerOrderId,
+            executedAt = executedAt,
+        )
 }

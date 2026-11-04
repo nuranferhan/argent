@@ -9,10 +9,12 @@ data class Balance(
     val asset: String,
     val available: String = "0",
     val held: String = "0",
-    val version: Long = 0
+    val version: Long = 0,
 ) {
     fun availableBd(): BigDecimal = BigDecimal(available)
+
     fun heldBd(): BigDecimal = BigDecimal(held)
+
     fun totalBd(): BigDecimal = availableBd() + heldBd()
 }
 
@@ -22,10 +24,12 @@ data class Position(
     val symbol: String,
     val quantity: String = "0",
     val avgEntryPrice: String = "0",
-    val realizedPnl: String = "0"
+    val realizedPnl: String = "0",
 ) {
     fun quantityBd(): BigDecimal = BigDecimal(quantity)
+
     fun avgEntryBd(): BigDecimal = BigDecimal(avgEntryPrice)
+
     fun realizedPnlBd(): BigDecimal = BigDecimal(realizedPnl)
 
     fun unrealizedPnl(mark: BigDecimal): BigDecimal {
@@ -44,7 +48,7 @@ data class PortfolioSnapshot(
     val unrealizedPnl: String,
     val riskScore: Int,
     val valuations: List<PortfolioValuation> = emptyList(),
-    val usdValuation: PortfolioUsdValuation? = null
+    val usdValuation: PortfolioUsdValuation? = null,
 )
 
 @Serializable
@@ -54,7 +58,7 @@ data class PortfolioUsdValuation(
     val unrealizedPnl: String,
     val grossExposure: String,
     val complete: Boolean,
-    val rateDate: String
+    val rateDate: String,
 )
 
 @Serializable
@@ -65,5 +69,5 @@ data class PortfolioValuation(
     val unrealizedPnl: String,
     val grossExposure: String,
     val priceComplete: Boolean,
-    val pnlComplete: Boolean
+    val pnlComplete: Boolean,
 )

@@ -1,6 +1,6 @@
 services:
   postgres:
-    image: postgres:16-alpine
+    image: postgres:16-alpine@sha256:0cefaabd882e42bcb2a2f3dc56d3ce4770560ba62fd7f197f1a2e008fd5731ab
     environment:
       POSTGRES_DB: argent
       POSTGRES_USER: argent
@@ -16,7 +16,7 @@ services:
       retries: 8
 
   redis:
-    image: redis:7-alpine
+    image: redis:7-alpine@sha256:8da19c7399dca900c6822a1cf30f9d2285585e2c4b457ff4095b0f4500054d3f
     environment:
       REDIS_PASSWORD: ${REDIS_PASSWORD:-argent}
     command: ["sh", "-c", "exec redis-server --requirepass \"$${REDIS_PASSWORD}\""]
@@ -29,7 +29,7 @@ services:
       retries: 8
 
   rabbitmq:
-    image: rabbitmq:3.13-management-alpine
+    image: rabbitmq:3.13-management-alpine@sha256:606d8c0d6b3c18d1da9afc53bc7cdb2a8d5486df91b5a9830e9e07626c9ae281
     ports:
       - "127.0.0.1:5672:5672"
       - "127.0.0.1:15672:15672"
@@ -43,7 +43,7 @@ services:
       retries: 8
 
   prometheus:
-    image: prom/prometheus:v2.54.1
+    image: prom/prometheus:v2.54.1@sha256:f6639335d34a77d9d9db382b92eeb7fc00934be8eae81dbc03b31cfe90411a94
     ports:
       - "127.0.0.1:9090:9090"
     volumes:
@@ -52,7 +52,7 @@ services:
       - "host.docker.internal:host-gateway"
 
   grafana:
-    image: grafana/grafana:11.2.0
+    image: grafana/grafana:11.2.0@sha256:408afb9726de5122b00a2576763a8a57a3c86d5b0eff5305bc994ceb3eb96c3f
     ports:
       - "127.0.0.1:3000:3000"
     environment:
@@ -86,12 +86,13 @@ services:
       OBSERVABILITY_TOKEN: ${OBSERVABILITY_TOKEN:-}
       BOOTSTRAP_ADMIN_EMAIL: ${BOOTSTRAP_ADMIN_EMAIL:-}
       BOOTSTRAP_ADMIN_PASSWORD: ${BOOTSTRAP_ADMIN_PASSWORD:-}
-      PUBLIC_SIGNUP_ENABLED: ${PUBLIC_SIGNUP_ENABLED:-true}
+      PUBLIC_SIGNUP_ENABLED: ${PUBLIC_SIGNUP_ENABLED:-false}
       GOOGLE_WEB_CLIENT_ID: ${GOOGLE_WEB_CLIENT_ID:-}
       GOOGLE_DESKTOP_CLIENT_ID: ${GOOGLE_DESKTOP_CLIENT_ID:-}
       SEED_MARKET_MAKER: ${SEED_MARKET_MAKER:-true}
       SEED_DEMO_FUNDS: ${SEED_DEMO_FUNDS:-true}
       MARKET_DATA_MODE: ${MARKET_DATA_MODE:-BINANCE_PUBLIC}
+      MARKET_SIMULATION_SEED: ${MARKET_SIMULATION_SEED:-10645015}
       ISTFIN_API_KEY: ${ISTFIN_API_KEY:-}
       FINNHUB_API_KEY: ${FINNHUB_API_KEY:-}
       BINANCE_SPOT_TESTNET_API_KEY: ${BINANCE_SPOT_TESTNET_API_KEY:-}

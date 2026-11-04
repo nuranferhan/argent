@@ -20,7 +20,9 @@ jobs:
     timeout-minutes: 35
     steps:
       - name: Check out repository
-        uses: actions/checkout@v4
+        uses: actions/checkout@v6
+        with:
+          fetch-depth: 0
 
       - name: Set up Java 21
         uses: actions/setup-java@v4
@@ -30,6 +32,16 @@ jobs:
 
       - name: Set up Gradle
         uses: gradle/actions/setup-gradle@v4
+
+      - name: Scan repository history for secrets
+        uses: gitleaks/gitleaks-action@v3
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITLEAKS_ENABLE_COMMENTS: false
+
+      - name: Review pull request dependencies
+        if: github.event_name == 'pull_request'
+        uses: actions/dependency-review-action@v5
 
       - name: Set up Android SDK
         uses: android-actions/setup-android@v4
@@ -41,10 +53,43 @@ jobs:
         run: chmod +x gradlew start.sh scripts/*.sh
 
       - name: Run automated, concurrency and recovery tests
-        run: ./gradlew test --no-daemon --max-workers=2
+        run: >-
+          ./gradlew test
+          :argent-engine:coverageVerification
+          :argent-ledger:coverageVerification
+          jacocoRootReport
+          --no-daemon --max-workers=2
+
+      - name: Enforce Kotlin formatting
+        run: ./gradlew ktlintCheck --no-daemon --max-workers=2
 
       - name: Compile desktop and Android apps
         run: ./gradlew :argent-terminal:compileKotlin :argent-android:compileDebugKotlin --no-daemon --max-workers=2
+
+      - name: Prevent oversized Kotlin source regressions
+        shell: bash
+        run: |
+          python3 - <<'PY'
+          from pathlib import Path
+          import sys
+
+          violations = []
+          for root in Path('.').glob('argent-*/src/main/kotlin'):
+              for source in root.rglob('*.kt'):
+                  lines = source.read_text(encoding='utf-8').splitlines()
+                  if len(lines) > 400:
+                      violations.append(f'{source}: {len(lines)} lines (limit 400)')
+                  violations.extend(
+                      f'{source}:{number}: {len(line)} chars (limit 780)'
+                      for number, line in enumerate(lines, 1)
+                      if len(line) > 780
+                  )
+
+          if violations:
+              print('\n'.join(violations))
+              sys.exit(1)
+          print('Kotlin source files meet the 400-line and 780-character regression limits.')
+          PY
 
       - name: Enable KVM for Android emulator
         run: |
@@ -66,6 +111,12 @@ jobs:
 
       - name: Generate JVM coverage report
         run: ./gradlew jacocoRootReport --no-daemon --max-workers=2
+
+      - name: Compare matching-engine benchmark on pull requests
+        if: github.event_name == 'pull_request'
+        run: |
+          ./gradlew :argent-engine:jmh --no-daemon --max-workers=2
+          python3 scripts/check-benchmark-regression.py
 
       - name: Upload coverage report
         uses: actions/upload-artifact@v4

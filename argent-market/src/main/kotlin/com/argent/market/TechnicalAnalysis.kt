@@ -19,34 +19,46 @@ data class TechnicalAnalysisSnapshot(
     val sampleCount: Int = 0,
     val trend: String = "INSUFFICIENT_DATA",
     val source: String? = null,
-    val timestamp: Long = 0
+    val timestamp: Long = 0,
 )
 
 object TechnicalAnalysis {
-    fun calculate(symbol: String, observations: List<TickerUpdate>): TechnicalAnalysisSnapshot {
+    fun calculate(
+        symbol: String,
+        observations: List<TickerUpdate>,
+    ): TechnicalAnalysisSnapshot {
         val instrument = Instruments.get(symbol) ?: return TechnicalAnalysisSnapshot(symbol = symbol)
-        val samples = observations.mapNotNull { update ->
-            update.price.toBigDecimalOrNull()?.let { update to it }
-        }
+        val samples =
+            observations.mapNotNull { update ->
+                update.price.toBigDecimalOrNull()?.let { update to it }
+            }
         val latest = samples.lastOrNull() ?: return TechnicalAnalysisSnapshot(symbol = instrument.symbol)
         val values = samples.map { it.second }
         val current = latest.second
         val sma20 = average(values, 20)
         val sma50 = average(values, 50)
         val rsi = rsi14(values)
-        val change = if (values.size >= 21) {
-            val base = values[values.lastIndex - 20]
-            if (base.signum() == 0) null else current.subtract(base)
-                .multiply(HUNDRED)
-                .divide(base, 6, RoundingMode.HALF_UP)
-        } else null
+        val change =
+            if (values.size >= 21) {
+                val base = values[values.lastIndex - 20]
+                if (base.signum() == 0) {
+                    null
+                } else {
+                    current.subtract(base)
+                        .multiply(HUNDRED)
+                        .divide(base, 6, RoundingMode.HALF_UP)
+                }
+            } else {
+                null
+            }
         val recent = values.takeLast(30)
-        val trend = when {
-            sma20 == null || sma50 == null -> "INSUFFICIENT_DATA"
-            current > sma20 && sma20 > sma50 -> "UPWARD"
-            current < sma20 && sma20 < sma50 -> "DOWNWARD"
-            else -> "MIXED"
-        }
+        val trend =
+            when {
+                sma20 == null || sma50 == null -> "INSUFFICIENT_DATA"
+                current > sma20 && sma20 > sma50 -> "UPWARD"
+                current < sma20 && sma20 < sma50 -> "DOWNWARD"
+                else -> "MIXED"
+            }
         return TechnicalAnalysisSnapshot(
             symbol = instrument.symbol,
             currentPrice = format(current, instrument.priceScale),
@@ -59,11 +71,14 @@ object TechnicalAnalysis {
             sampleCount = values.size,
             trend = trend,
             source = latest.first.source,
-            timestamp = latest.first.timestamp
+            timestamp = latest.first.timestamp,
         )
     }
 
-    private fun average(values: List<BigDecimal>, period: Int): BigDecimal? {
+    private fun average(
+        values: List<BigDecimal>,
+        period: Int,
+    ): BigDecimal? {
         if (values.size < period) return null
         val window = values.takeLast(period)
         return window.fold(BigDecimal.ZERO) { sum, value -> sum.add(value) }
@@ -85,8 +100,10 @@ object TechnicalAnalysis {
         return HUNDRED.subtract(HUNDRED.divide(BigDecimal.ONE.add(relativeStrength), 6, RoundingMode.HALF_UP))
     }
 
-    private fun format(value: BigDecimal, scale: Int): String =
-        value.setScale(scale, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
+    private fun format(
+        value: BigDecimal,
+        scale: Int,
+    ): String = value.setScale(scale, RoundingMode.HALF_UP).stripTrailingZeros().toPlainString()
 
     private val HUNDRED = BigDecimal("100")
 }

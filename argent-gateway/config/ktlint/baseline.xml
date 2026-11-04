@@ -1,0 +1,370 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="src/main/kotlin/com/argent/gateway/Application.kt">
+        <error line="94" column="1" source="standard:max-line-length" />
+        <error line="289" column="1" source="standard:max-line-length" />
+        <error line="351" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/AssistantRoutes.kt">
+        <error line="175" column="1" source="standard:max-line-length" />
+        <error line="179" column="1" source="standard:max-line-length" />
+        <error line="184" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/ExternalMarketRoutes.kt">
+        <error line="17" column="1" source="standard:max-line-length" />
+        <error line="20" column="1" source="standard:max-line-length" />
+        <error line="29" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/GatewayRecovery.kt">
+        <error line="83" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/InstrumentCatalogStore.kt">
+        <error line="76" column="1" source="standard:max-line-length" />
+        <error line="94" column="1" source="standard:max-line-length" />
+        <error line="106" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/MarketReadRoutes.kt">
+        <error line="41" column="1" source="standard:max-line-length" />
+        <error line="54" column="1" source="standard:max-line-length" />
+        <error line="156" column="1" source="standard:max-line-length" />
+        <error line="166" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/PriceAlertRoutes.kt">
+        <error line="72" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/SystemRoutes.kt">
+        <error line="31" column="1" source="standard:max-line-length" />
+        <error line="64" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/TenantRoutes.kt">
+        <error line="33" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/TradingAdminRoutes.kt">
+        <error line="42" column="1" source="standard:max-line-length" />
+        <error line="51" column="1" source="standard:max-line-length" />
+        <error line="78" column="1" source="standard:max-line-length" />
+        <error line="83" column="1" source="standard:max-line-length" />
+        <error line="91" column="1" source="standard:max-line-length" />
+        <error line="105" column="1" source="standard:max-line-length" />
+        <error line="109" column="1" source="standard:max-line-length" />
+        <error line="173" column="1" source="standard:max-line-length" />
+        <error line="177" column="1" source="standard:max-line-length" />
+        <error line="212" column="1" source="standard:max-line-length" />
+        <error line="216" column="1" source="standard:max-line-length" />
+        <error line="237" column="1" source="standard:max-line-length" />
+        <error line="238" column="1" source="standard:max-line-length" />
+        <error line="244" column="1" source="standard:max-line-length" />
+        <error line="262" column="1" source="standard:max-line-length" />
+        <error line="263" column="1" source="standard:max-line-length" />
+        <error line="269" column="1" source="standard:max-line-length" />
+        <error line="316" column="1" source="standard:max-line-length" />
+        <error line="337" column="1" source="standard:max-line-length" />
+        <error line="351" column="1" source="standard:max-line-length" />
+        <error line="361" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/api/Dtos.kt">
+        <error line="146" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/assistant/AssistantAlertEvaluator.kt">
+        <error line="15" column="1" source="standard:max-line-length" />
+        <error line="28" column="1" source="standard:max-line-length" />
+        <error line="29" column="1" source="standard:max-line-length" />
+        <error line="32" column="1" source="standard:max-line-length" />
+        <error line="35" column="1" source="standard:max-line-length" />
+        <error line="39" column="1" source="standard:max-line-length" />
+        <error line="42" column="1" source="standard:max-line-length" />
+        <error line="53" column="1" source="standard:max-line-length" />
+        <error line="59" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/assistant/AssistantDemoScenarios.kt">
+        <error line="20" column="1" source="standard:max-line-length" />
+        <error line="21" column="1" source="standard:max-line-length" />
+        <error line="22" column="1" source="standard:max-line-length" />
+        <error line="23" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/assistant/AssistantHistorySearch.kt">
+        <error line="34" column="1" source="standard:max-line-length" />
+        <error line="39" column="1" source="standard:max-line-length" />
+        <error line="59" column="1" source="standard:max-line-length" />
+        <error line="80" column="1" source="standard:max-line-length" />
+        <error line="101" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/assistant/AssistantHistorySummary.kt">
+        <error line="33" column="1" source="standard:max-line-length" />
+        <error line="53" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/assistant/AssistantOrderDraftService.kt">
+        <error line="40" column="1" source="standard:max-line-length" />
+        <error line="63" column="1" source="standard:max-line-length" />
+        <error line="75" column="1" source="standard:max-line-length" />
+        <error line="93" column="1" source="standard:max-line-length" />
+        <error line="94" column="1" source="standard:max-line-length" />
+        <error line="96" column="1" source="standard:max-line-length" />
+        <error line="105" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/assistant/AssistantResponseCleaner.kt">
+        <error line="7" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/assistant/ReadOnlyAssistantService.kt">
+        <error line="78" column="1" source="standard:max-line-length" />
+        <error line="83" column="1" source="standard:max-line-length" />
+        <error line="99" column="1" source="standard:max-line-length" />
+        <error line="226" column="1" source="standard:max-line-length" />
+        <error line="230" column="1" source="standard:max-line-length" />
+        <error line="239" column="1" source="standard:max-line-length" />
+        <error line="295" column="1" source="standard:max-line-length" />
+        <error line="297" column="1" source="standard:max-line-length" />
+        <error line="299" column="1" source="standard:max-line-length" />
+        <error line="302" column="1" source="standard:max-line-length" />
+        <error line="308" column="1" source="standard:max-line-length" />
+        <error line="351" column="1" source="standard:max-line-length" />
+        <error line="352" column="1" source="standard:max-line-length" />
+        <error line="353" column="1" source="standard:max-line-length" />
+        <error line="361" column="1" source="standard:max-line-length" />
+        <error line="367" column="1" source="standard:max-line-length" />
+        <error line="373" column="1" source="standard:max-line-length" />
+        <error line="390" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/auth/AuthCredentialService.kt">
+        <error line="125" column="1" source="standard:max-line-length" />
+        <error line="144" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/auth/AuthSchemaInitializer.kt">
+        <error line="57" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/auth/AuthService.kt">
+        <error line="25" column="1" source="standard:max-line-length" />
+        <error line="227" column="1" source="standard:max-line-length" />
+        <error line="234" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/auth/GoogleIdentityService.kt">
+        <error line="46" column="1" source="standard:max-line-length" />
+        <error line="69" column="1" source="standard:max-line-length" />
+        <error line="70" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/auth/TenantMembershipService.kt">
+        <error line="19" column="1" source="standard:max-line-length" />
+        <error line="42" column="1" source="standard:max-line-length" />
+        <error line="100" column="1" source="standard:max-line-length" />
+        <error line="102" column="1" source="standard:max-line-length" />
+        <error line="144" column="1" source="standard:max-line-length" />
+        <error line="147" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/market/CandleStore.kt">
+        <error line="102" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/market/ExternalMarketDataService.kt">
+        <error line="94" column="1" source="standard:max-line-length" />
+        <error line="123" column="1" source="standard:max-line-length" />
+        <error line="156" column="1" source="standard:max-line-length" />
+        <error line="170" column="1" source="standard:max-line-length" />
+        <error line="204" column="1" source="standard:max-line-length" />
+        <error line="258" column="1" source="standard:max-line-length" />
+        <error line="322" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/market/PriceAlertStore.kt">
+        <error line="123" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/mm/LiquidityProvider.kt">
+        <error line="33" column="1" source="standard:max-line-length" />
+        <error line="34" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/order/OrderRepository.kt">
+        <error line="287" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/ratelimit/RedisRateLimiter.kt">
+        <error line="47" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/trading/BinanceTestnetExecutionService.kt">
+        <error line="220" column="1" source="standard:max-line-length" />
+        <error line="248" column="1" source="standard:max-line-length" />
+        <error line="257" column="1" source="standard:max-line-length" />
+        <error line="268" column="1" source="standard:max-line-length" />
+        <error line="354" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/gateway/trading/TradingService.kt">
+        <error line="58" column="1" source="standard:max-line-length" />
+        <error line="66" column="1" source="standard:max-line-length" />
+        <error line="157" column="1" source="standard:max-line-length" />
+        <error line="232" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/test/kotlin/com/argent/gateway/GatewayRoutesIntegrationTest.kt">
+        <error line="3" column="1" source="standard:import-ordering" />
+        <error line="7" column="1" source="standard:no-unused-imports" />
+        <error line="22" column="1" source="standard:no-unused-imports" />
+        <error line="63" column="114" source="standard:trailing-comma-on-call-site" />
+        <error line="66" column="26" source="standard:multiline-expression-wrapping" />
+        <error line="66" column="43" source="standard:multiline-expression-wrapping" />
+        <error line="66" column="43" source="standard:wrapping" />
+        <error line="70" column="9" source="standard:wrapping" />
+        <error line="81" column="25" source="standard:trailing-comma-on-call-site" />
+        <error line="86" column="117" source="standard:trailing-comma-on-call-site" />
+        <error line="99" column="22" source="standard:multiline-expression-wrapping" />
+        <error line="105" column="22" source="standard:multiline-expression-wrapping" />
+        <error line="125" column="40" source="standard:trailing-comma-on-call-site" />
+        <error line="136" column="23" source="standard:multiline-expression-wrapping" />
+        <error line="160" column="53" source="standard:trailing-comma-on-call-site" />
+        <error line="169" column="1" source="standard:max-line-length" />
+        <error line="169" column="42" source="standard:argument-list-wrapping" />
+        <error line="169" column="69" source="standard:argument-list-wrapping" />
+        <error line="169" column="75" source="standard:argument-list-wrapping" />
+        <error line="169" column="120" source="standard:argument-list-wrapping" />
+        <error line="169" column="121" source="standard:argument-list-wrapping" />
+        <error line="174" column="1" source="standard:max-line-length" />
+        <error line="174" column="38" source="standard:argument-list-wrapping" />
+        <error line="174" column="64" source="standard:argument-list-wrapping" />
+        <error line="174" column="107" source="standard:argument-list-wrapping" />
+        <error line="174" column="113" source="standard:argument-list-wrapping" />
+        <error line="174" column="114" source="standard:argument-list-wrapping" />
+        <error line="174" column="123" source="standard:argument-list-wrapping" />
+        <error line="176" column="1" source="standard:max-line-length" />
+        <error line="179" column="1" source="standard:max-line-length" />
+        <error line="179" column="102" source="standard:argument-list-wrapping" />
+        <error line="179" column="111" source="standard:argument-list-wrapping" />
+        <error line="179" column="119" source="standard:argument-list-wrapping" />
+        <error line="182" column="1" source="standard:max-line-length" />
+        <error line="184" column="35" source="standard:if-else-wrapping" />
+        <error line="184" column="40" source="standard:if-else-bracing" />
+        <error line="184" column="40" source="standard:multiline-if-else" />
+        <error line="184" column="40" source="standard:if-else-wrapping" />
+        <error line="194" column="54" source="standard:trailing-comma-on-call-site" />
+        <error line="200" column="29" source="standard:multiline-expression-wrapping" />
+        <error line="205" column="1" source="standard:max-line-length" />
+        <error line="205" column="59" source="standard:argument-list-wrapping" />
+        <error line="205" column="77" source="standard:argument-list-wrapping" />
+        <error line="209" column="30" source="standard:multiline-expression-wrapping" />
+        <error line="212" column="1" source="standard:max-line-length" />
+        <error line="212" column="29" source="standard:argument-list-wrapping" />
+        <error line="212" column="148" source="standard:argument-list-wrapping" />
+        <error line="218" column="1" source="standard:max-line-length" />
+        <error line="218" column="42" source="standard:argument-list-wrapping" />
+        <error line="218" column="60" source="standard:argument-list-wrapping" />
+        <error line="222" column="1" source="standard:max-line-length" />
+        <error line="222" column="44" source="standard:argument-list-wrapping" />
+        <error line="222" column="63" source="standard:argument-list-wrapping" />
+        <error line="226" column="33" source="standard:multiline-expression-wrapping" />
+        <error line="231" column="1" source="standard:max-line-length" />
+        <error line="231" column="45" source="standard:argument-list-wrapping" />
+        <error line="231" column="61" source="standard:argument-list-wrapping" />
+    </file>
+    <file name="src/test/kotlin/com/argent/gateway/InstrumentCatalogStoreTest.kt">
+        <error line="3" column="1" source="standard:import-ordering" />
+        <error line="27" column="29" source="standard:trailing-comma-on-call-site" />
+        <error line="32" column="128" source="standard:trailing-comma-on-call-site" />
+        <error line="53" column="1" source="standard:max-line-length" />
+        <error line="53" column="24" source="standard:property-wrapping" />
+        <error line="79" column="136" source="standard:trailing-comma-on-call-site" />
+        <error line="98" column="35" source="standard:multiline-expression-wrapping" />
+        <error line="98" column="35" source="standard:function-signature" />
+        <error line="98" column="52" source="standard:multiline-expression-wrapping" />
+        <error line="98" column="52" source="standard:wrapping" />
+        <error line="102" column="5" source="standard:wrapping" />
+        <error line="115" column="25" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/argent/gateway/InstrumentTradabilityTest.kt">
+        <error line="3" column="1" source="standard:import-ordering" />
+        <error line="15" column="1" source="standard:max-line-length" />
+        <error line="16" column="1" source="standard:max-line-length" />
+        <error line="17" column="1" source="standard:max-line-length" />
+        <error line="17" column="137" source="standard:trailing-comma-on-call-site" />
+        <error line="18" column="14" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/argent/gateway/MarketReadValidationTest.kt">
+        <error line="13" column="36" source="standard:multiline-expression-wrapping" />
+        <error line="13" column="36" source="standard:wrapping" />
+        <error line="14" column="114" source="standard:trailing-comma-on-call-site" />
+        <error line="15" column="9" source="standard:wrapping" />
+    </file>
+    <file name="src/test/kotlin/com/argent/gateway/auth/TenantAuthTest.kt">
+        <error line="3" column="1" source="standard:import-ordering" />
+        <error line="13" column="26" source="standard:multiline-expression-wrapping" />
+        <error line="13" column="43" source="standard:multiline-expression-wrapping" />
+        <error line="13" column="43" source="standard:wrapping" />
+        <error line="16" column="9" source="standard:wrapping" />
+        <error line="94" column="1" source="standard:max-line-length" />
+        <error line="94" column="71" source="standard:argument-list-wrapping" />
+        <error line="94" column="87" source="standard:argument-list-wrapping" />
+        <error line="94" column="99" source="standard:argument-list-wrapping" />
+        <error line="94" column="109" source="standard:argument-list-wrapping" />
+        <error line="94" column="126" source="standard:argument-list-wrapping" />
+        <error line="95" column="1" source="standard:max-line-length" />
+        <error line="95" column="71" source="standard:argument-list-wrapping" />
+        <error line="95" column="87" source="standard:argument-list-wrapping" />
+        <error line="95" column="97" source="standard:argument-list-wrapping" />
+        <error line="95" column="107" source="standard:argument-list-wrapping" />
+        <error line="95" column="124" source="standard:argument-list-wrapping" />
+        <error line="108" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/test/kotlin/com/argent/gateway/config/AppConfigTest.kt">
+        <error line="3" column="1" source="standard:import-ordering" />
+        <error line="48" column="49" source="standard:multiline-expression-wrapping" />
+        <error line="48" column="49" source="standard:function-signature" />
+        <error line="58" column="37" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/argent/gateway/event/PostgresEventStoreTest.kt">
+        <error line="13" column="24" source="standard:multiline-expression-wrapping" />
+        <error line="15" column="37" source="standard:trailing-comma-on-call-site" />
+        <error line="18" column="1" source="standard:max-line-length" />
+        <error line="18" column="20" source="standard:property-wrapping" />
+        <error line="18" column="27" source="standard:argument-list-wrapping" />
+        <error line="18" column="46" source="standard:argument-list-wrapping" />
+        <error line="18" column="64" source="standard:argument-list-wrapping" />
+        <error line="18" column="87" source="standard:argument-list-wrapping" />
+        <error line="18" column="111" source="standard:argument-list-wrapping" />
+        <error line="18" column="126" source="standard:argument-list-wrapping" />
+        <error line="18" column="140" source="standard:argument-list-wrapping" />
+        <error line="22" column="1" source="standard:max-line-length" />
+        <error line="22" column="19" source="standard:property-wrapping" />
+        <error line="22" column="26" source="standard:argument-list-wrapping" />
+        <error line="22" column="44" source="standard:argument-list-wrapping" />
+        <error line="22" column="62" source="standard:argument-list-wrapping" />
+        <error line="22" column="84" source="standard:argument-list-wrapping" />
+        <error line="22" column="108" source="standard:argument-list-wrapping" />
+        <error line="22" column="123" source="standard:argument-list-wrapping" />
+        <error line="22" column="137" source="standard:argument-list-wrapping" />
+        <error line="26" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/test/kotlin/com/argent/gateway/market/CandleStoreTest.kt">
+        <error line="10" column="24" source="standard:multiline-expression-wrapping" />
+        <error line="12" column="37" source="standard:trailing-comma-on-call-site" />
+        <error line="25" column="24" source="standard:multiline-expression-wrapping" />
+        <error line="27" column="37" source="standard:trailing-comma-on-call-site" />
+        <error line="32" column="29" source="standard:multiline-expression-wrapping" />
+        <error line="32" column="29" source="standard:wrapping" />
+        <error line="36" column="115" source="standard:trailing-comma-on-call-site" />
+        <error line="37" column="9" source="standard:wrapping" />
+    </file>
+    <file name="src/test/kotlin/com/argent/gateway/mm/MarketMakerControlStoreTest.kt">
+        <error line="3" column="1" source="standard:import-ordering" />
+        <error line="28" column="26" source="standard:multiline-expression-wrapping" />
+        <error line="28" column="43" source="standard:multiline-expression-wrapping" />
+        <error line="28" column="43" source="standard:wrapping" />
+        <error line="31" column="9" source="standard:wrapping" />
+        <error line="49" column="118" source="standard:trailing-comma-on-call-site" />
+        <error line="51" column="30" source="standard:multiline-expression-wrapping" />
+        <error line="51" column="47" source="standard:multiline-expression-wrapping" />
+        <error line="51" column="47" source="standard:wrapping" />
+        <error line="55" column="13" source="standard:wrapping" />
+        <error line="66" column="34" source="standard:multiline-expression-wrapping" />
+        <error line="68" column="92" source="standard:trailing-comma-on-call-site" />
+        <error line="71" column="32" source="standard:multiline-expression-wrapping" />
+        <error line="79" column="43" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/argent/gateway/security/ClientAddressResolverTest.kt">
+        <error line="14" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/test/kotlin/com/argent/gateway/trading/TradingServiceTest.kt">
+        <error line="3" column="1" source="standard:import-ordering" />
+        <error line="25" column="114" source="standard:trailing-comma-on-call-site" />
+        <error line="27" column="18" source="standard:multiline-expression-wrapping" />
+        <error line="32" column="14" source="standard:trailing-comma-on-call-site" />
+        <error line="47" column="20" source="standard:multiline-expression-wrapping" />
+        <error line="49" column="75" source="standard:trailing-comma-on-call-site" />
+        <error line="52" column="19" source="standard:multiline-expression-wrapping" />
+        <error line="54" column="74" source="standard:trailing-comma-on-call-site" />
+        <error line="77" column="22" source="standard:multiline-expression-wrapping" />
+        <error line="79" column="72" source="standard:trailing-comma-on-call-site" />
+        <error line="88" column="22" source="standard:multiline-expression-wrapping" />
+        <error line="98" column="46" source="standard:trailing-comma-on-call-site" />
+    </file>
+</baseline>

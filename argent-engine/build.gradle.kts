@@ -13,8 +13,30 @@ dependencies {
     api(project(":argent-common"))
 }
 
+tasks.register<JacocoCoverageVerification>("coverageVerification") {
+    dependsOn(tasks.test)
+    executionData.setFrom(layout.buildDirectory.file("jacoco/test.exec"))
+    // JMH fixtures are measurement tooling, not production engine code.
+    classDirectories.setFrom(
+        fileTree(layout.buildDirectory.dir("classes/kotlin/main")) {
+            exclude("**/bench/**")
+        },
+    )
+    sourceDirectories.setFrom(layout.projectDirectory.dir("src/main/kotlin"))
+    violationRules {
+        rule {
+            limit {
+                counter = "LINE"
+                value = "COVEREDRATIO"
+                minimum = "0.80".toBigDecimal()
+            }
+        }
+    }
+}
+
 jmh {
     jmhVersion.set("1.37")
+    includes.set(listOf(".*addLimitOrderToBookOfConfiguredSize.*"))
     warmupIterations.set(3)
     warmup.set("2s")
     iterations.set(5)

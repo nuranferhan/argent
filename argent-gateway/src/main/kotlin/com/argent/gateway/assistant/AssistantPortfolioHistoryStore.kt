@@ -28,28 +28,35 @@ class AssistantPortfolioHistoryStore(private val db: Database) {
 
     data class Baseline(val snapshot: PortfolioSnapshot, val sampledAt: Long)
 
-    fun initSchema() = transaction(db) {
-        SchemaUtils.createMissingTablesAndColumns(Snapshots)
-    }
+    fun initSchema() =
+        transaction(db) {
+            SchemaUtils.createMissingTablesAndColumns(Snapshots)
+        }
 
     /** Records at most one sample per account per five-minute bucket, then returns the first sample today. */
-    fun recordAndGetDailyBaseline(accountId: String, snapshot: PortfolioSnapshot, now: Long): Baseline? = transaction(db) {
-        val bucket = now / SAMPLE_INTERVAL_MS * SAMPLE_INTERVAL_MS
-        Snapshots.insertIgnore {
-            it[Snapshots.accountId] = accountId
-            it[sampledAt] = bucket
-            it[payload] = json.encodeToString(snapshot)
+    fun recordAndGetDailyBaseline(
+        accountId: String,
+        snapshot: PortfolioSnapshot,
+        now: Long,
+    ): Baseline? =
+        transaction(db) {
+            val bucket = now / SAMPLE_INTERVAL_MS * SAMPLE_INTERVAL_MS
+            Snapshots.insertIgnore {
+                it[Snapshots.accountId] = accountId
+                it[sampledAt] = bucket
+                it[payload] = json.encodeToString(snapshot)
+            }
+            val zone = ZoneId.of("Europe/Istanbul")
+            val dayStart =
+                Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
+                    .atStartOfDay(zone).toInstant().toEpochMilli()
+            Snapshots.selectAll()
+                .where { (Snapshots.accountId eq accountId) and (Snapshots.sampledAt greaterEq dayStart) }
+                .orderBy(Snapshots.sampledAt to SortOrder.ASC)
+                .limit(1)
+                .firstOrNull()
+                ?.let { Baseline(json.decodeFromString(it[Snapshots.payload]), it[Snapshots.sampledAt]) }
         }
-        val zone = ZoneId.of("Europe/Istanbul")
-        val dayStart = Instant.ofEpochMilli(now).atZone(zone).toLocalDate()
-            .atStartOfDay(zone).toInstant().toEpochMilli()
-        Snapshots.selectAll()
-            .where { (Snapshots.accountId eq accountId) and (Snapshots.sampledAt greaterEq dayStart) }
-            .orderBy(Snapshots.sampledAt to SortOrder.ASC)
-            .limit(1)
-            .firstOrNull()
-            ?.let { Baseline(json.decodeFromString(it[Snapshots.payload]), it[Snapshots.sampledAt]) }
-    }
 
     companion object {
         private const val SAMPLE_INTERVAL_MS = 5 * 60 * 1000L

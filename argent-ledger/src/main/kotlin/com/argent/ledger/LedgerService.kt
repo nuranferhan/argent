@@ -5,12 +5,9 @@ import com.argent.common.domain.Position
 import com.argent.common.events.DomainEvent
 import com.argent.common.events.FundsHeld
 import com.argent.common.events.FundsReleased
-import com.argent.common.events.SettlementCompleted
 import org.jetbrains.exposed.sql.Database
-import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.insert
-import org.jetbrains.exposed.sql.SqlExpressionBuilder.like
 import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.update
@@ -41,177 +38,62 @@ class LedgerService(
     private val log = LoggerFactory.getLogger(LedgerService::class.java)
     private val db = Database.connect(dataSource)
 
-    object Balances : Table("balances") {
-        val userId = varchar("user_id", 64)
-        val asset = varchar("asset", 32)
-        val available = decimal("available", 36, 18)
-        val held = decimal("held", 36, 18)
-        val version = long("version")
-        override val primaryKey = PrimaryKey(userId, asset)
-    }
+    private val accountQueries by lazy { LedgerAccountQueries(db, ::readBalance, ::readPosition) }
 
-    object JournalEntries : Table("journal_entries") {
-        val id = varchar("id", 64)
-        val txId = varchar("tx_id", 64)
-        val account = varchar("account", 64)
-        val asset = varchar("asset", 32)
-        val debit = decimal("debit", 36, 18)
-        val credit = decimal("credit", 36, 18)
-        val description = varchar("description", 256)
-        val createdAt = long("created_at")
-        override val primaryKey = PrimaryKey(id)
-    }
+    fun initSchema() = accountQueries.initSchema()
+    fun getBalance(userId: String, asset: String): Balance = accountQueries.getBalance(userId, asset)
+    fun listBalances(userId: String): List<Balance> = accountQueries.listBalances(userId)
+    fun activeHoldOrderIds(): List<String> = accountQueries.activeHoldOrderIds()
+    fun getPosition(userId: String, symbol: String): Position = accountQueries.getPosition(userId, symbol)
+    fun listPositions(userId: String): List<Position> = accountQueries.listPositions(userId)
+    fun verifyInvariant(): Boolean = accountQueries.verifyInvariant()
+    fun verifyReconciliation(): Boolean = accountQueries.verifyReconciliation()
+    fun reconciliationReport(): ReconciliationReport = accountQueries.reconciliationReport()
+    fun journalForTx(txId: String): List<Pair<BigDecimal, BigDecimal>> = accountQueries.journalForTx(txId)
 
-    object IdempotencyKeys : Table("idempotency_keys") {
-        val key = varchar("key", 256)
-        val result = text("result")
-        val requestHash = varchar("request_hash", 128).nullable()
-        val createdAt = long("created_at")
-        override val primaryKey = PrimaryKey(key)
-    }
+    fun expireWorthlessDerivative(symbol: String): Int = transaction(db) {
+        var closed = 0
+        Positions.selectAll().where { Positions.symbol eq symbol }.forUpdate().forEach { position ->
+            val userId = position[Positions.userId]
+            val quantity = position[Positions.quantity]
+            if (quantity.signum() == 0) return@forEach
 
-    object OrderHolds : Table("order_holds") {
-        val orderId = varchar("order_id", 64)
-        val userId = varchar("user_id", 64)
-        val asset = varchar("asset", 32)
-        val remaining = decimal("remaining", 36, 18)
-        override val primaryKey = PrimaryKey(orderId)
-    }
-
-    object Positions : Table("positions") {
-        val userId = varchar("user_id", 64)
-        val symbol = varchar("symbol", 32)
-        val quantity = decimal("quantity", 36, 18)
-        val avgEntry = decimal("avg_entry", 36, 18)
-        val realizedPnl = decimal("realized_pnl", 36, 18)
-        override val primaryKey = PrimaryKey(userId, symbol)
-    }
-
-    object Settlements : Table("settlements") {
-        val tradeId = varchar("trade_id", 64)
-        val createdAt = long("created_at")
-        override val primaryKey = PrimaryKey(tradeId)
-    }
-
-    fun initSchema() {
-        val isPostgres = db.vendor.contains("postgres", ignoreCase = true)
-        transaction(db) {
-            // Older local databases may already have journal rows with user_id but
-            // without account. Preserve that ownership when adding the account column;
-            // otherwise all historical user postings become invisible to reconciliation.
-            if (isPostgres) {
-                exec("""
-                    DO ${'$'}${'$'}
-                    BEGIN
-                        IF to_regclass('journal_entries') IS NOT NULL THEN
-                            ALTER TABLE journal_entries ADD COLUMN IF NOT EXISTS account VARCHAR(64);
-                            IF EXISTS (
-                                SELECT 1 FROM information_schema.columns
-                                WHERE table_schema = current_schema()
-                                  AND table_name = 'journal_entries'
-                                  AND column_name = 'user_id'
-                            ) THEN
-                                UPDATE journal_entries
-                                SET account = user_id
-                                WHERE account IS NULL AND user_id IS NOT NULL;
-                                -- Repair rows already migrated by older builds that
-                                -- assigned LEGACY_UNASSIGNED before preserving user_id.
-                                UPDATE journal_entries
-                                SET account = user_id
-                                WHERE account = 'LEGACY_UNASSIGNED' AND user_id IS NOT NULL;
-                            END IF;
-                            UPDATE journal_entries SET account = 'LEGACY_UNASSIGNED' WHERE account IS NULL;
-                            ALTER TABLE journal_entries ALTER COLUMN account SET NOT NULL;
-                            IF EXISTS (
-                                SELECT 1 FROM information_schema.columns
-                                WHERE table_schema = current_schema()
-                                  AND table_name = 'journal_entries'
-                                  AND column_name = 'user_id'
-                            ) THEN
-                                ALTER TABLE journal_entries ALTER COLUMN user_id DROP NOT NULL;
-                            END IF;
-                        END IF;
-                    END
-                    ${'$'}${'$'}
-                """.trimIndent())
+            if (quantity.signum() > 0) {
+                val balance = lockBalance(userId, symbol) ?: return@forEach
+                if (balance[Balances.available] < quantity || balance[Balances.held].signum() != 0) return@forEach
+                writeBalance(balance, balance[Balances.available] - quantity, balance[Balances.held])
+                val txId = UUID.randomUUID().toString()
+                journal(txId, userId, symbol, quantity, BigDecimal.ZERO, "Derivative expiry writeoff symbol=$symbol")
+                journal(txId, "DERIVATIVE_EXPIRY_LOSS", symbol, BigDecimal.ZERO, quantity, "Derivative expiry loss symbol=$symbol")
+                assertTxBalanced(txId)
             }
-            SchemaUtils.createMissingTablesAndColumns(Balances, JournalEntries, IdempotencyKeys, OrderHolds, Positions, Settlements)
-            if (isPostgres) {
-                exec("ALTER TABLE idempotency_keys ALTER COLUMN key TYPE VARCHAR(256)")
-                exec("ALTER TABLE idempotency_keys ADD COLUMN IF NOT EXISTS request_hash VARCHAR(128)")
+
+            val entry = position[Positions.avgEntry]
+            val realized = position[Positions.realizedPnl] +
+                if (quantity.signum() > 0) entry.multiply(quantity).negate() else entry.multiply(quantity.abs())
+            Positions.update({ (Positions.userId eq userId) and (Positions.symbol eq symbol) and (Positions.quantity eq quantity) }) {
+                it[Positions.quantity] = BigDecimal.ZERO
+                it[Positions.avgEntry] = BigDecimal.ZERO
+                it[Positions.realizedPnl] = realized
             }
+            closed++
         }
+        closed
     }
 
-    fun getBalance(userId: String, asset: String): Balance = transaction(db) {
-        readBalance(userId, asset)
+    private val funding by lazy {
+        LedgerFundingService(
+            db, ::creditAvailable, ::lockBalance, ::writeBalance, ::journal,
+            ::assertTxBalanced, ::readBalance, ::storedBalance,
+            ::rememberBalance, ::idempotencyFingerprint
+        )
     }
 
-    fun listBalances(userId: String): List<Balance> = transaction(db) {
-        Balances.selectAll().where { Balances.userId eq userId }.map { rowToBalance(it) }
-            .filter { it.availableBd().signum() != 0 || it.heldBd().signum() != 0 }
-    }
+    fun deposit(userId: String, asset: String, amount: BigDecimal, idempotencyKey: String? = null): Balance =
+        funding.deposit(userId, asset, amount, idempotencyKey)
 
-    fun activeHoldOrderIds(): List<String> = transaction(db) {
-        OrderHolds.selectAll()
-            .filter { it[OrderHolds.remaining].signum() > 0 }
-            .map { it[OrderHolds.orderId] }
-    }
-
-    fun getPosition(userId: String, symbol: String): Position = transaction(db) {
-        readPosition(userId, symbol)
-    }
-
-    fun listPositions(userId: String): List<Position> = transaction(db) {
-        Positions.selectAll().where { Positions.userId eq userId }.map { rowToPosition(it) }
-            .filter { it.quantityBd().signum() != 0 || it.realizedPnlBd().signum() != 0 }
-    }
-
-    fun deposit(userId: String, asset: String, amount: BigDecimal, idempotencyKey: String? = null): Balance {
-        require(amount > BigDecimal.ZERO) { "Amount must be positive" }
-        require(idempotencyKey == null || idempotencyKey.length in 1..128) { "Idempotency key must contain 1 to 128 characters" }
-        val key = idempotencyKey?.let { "deposit:$userId:$asset:$it" }
-        val requestHash = idempotencyFingerprint(asset, amount)
-        return transaction(db) {
-            storedBalance(key, requestHash)?.let { return@transaction it }
-            idempotencyKey?.let { legacy ->
-                storedBalance("deposit:$userId:$legacy", requestHash)?.takeIf { it.userId == userId && it.asset == asset }?.let { return@transaction it }
-                storedBalance("deposit:$legacy")?.takeIf { it.userId == userId && it.asset == asset }?.let { return@transaction it }
-            }
-            val txId = UUID.randomUUID().toString()
-            creditAvailable(userId, asset, amount)
-            journal(txId, "SYSTEM", asset, debit = amount, credit = BigDecimal.ZERO, "Deposit custody")
-            journal(txId, userId, asset, debit = BigDecimal.ZERO, credit = amount, "Deposit liability")
-            assertTxBalanced(txId)
-            val bal = readBalance(userId, asset)
-            rememberBalance(key, bal, requestHash)
-            bal
-        }
-    }
-
-    fun withdraw(userId: String, asset: String, amount: BigDecimal, idempotencyKey: String? = null): Balance {
-        require(amount > BigDecimal.ZERO) { "Amount must be positive" }
-        require(idempotencyKey == null || idempotencyKey.length in 1..128) { "Idempotency key must contain 1 to 128 characters" }
-        val key = idempotencyKey?.let { "withdraw:$userId:$asset:$it" }
-        val requestHash = idempotencyFingerprint(asset, amount)
-        return transaction(db) {
-            storedBalance(key, requestHash)?.let { return@transaction it }
-            idempotencyKey?.let { legacy ->
-                storedBalance("withdraw:$userId:$legacy", requestHash)?.takeIf { it.userId == userId && it.asset == asset }?.let { return@transaction it }
-                storedBalance("withdraw:$legacy")?.takeIf { it.userId == userId && it.asset == asset }?.let { return@transaction it }
-            }
-            val current = lockBalance(userId, asset) ?: throw IllegalArgumentException("Insufficient $asset")
-            if (current[Balances.available] < amount) throw IllegalArgumentException("Insufficient available $asset")
-            writeBalance(current, current[Balances.available] - amount, current[Balances.held])
-            val txId = UUID.randomUUID().toString()
-            journal(txId, userId, asset, debit = amount, credit = BigDecimal.ZERO, "Withdraw liability")
-            journal(txId, "SYSTEM", asset, debit = BigDecimal.ZERO, credit = amount, "Withdraw custody")
-            assertTxBalanced(txId)
-            val bal = readBalance(userId, asset)
-            rememberBalance(key, bal, requestHash)
-            bal
-        }
-    }
+    fun withdraw(userId: String, asset: String, amount: BigDecimal, idempotencyKey: String? = null): Balance =
+        funding.withdraw(userId, asset, amount, idempotencyKey)
 
     fun hold(userId: String, asset: String, amount: BigDecimal, orderId: String): Boolean {
         require(amount > BigDecimal.ZERO)
@@ -254,22 +136,24 @@ class LedgerService(
         return false
     }
 
-    fun releaseRemainingHold(orderId: String) {
-        val released = transaction(db) {
-            val hold = OrderHolds.selectAll().where { OrderHolds.orderId eq orderId }.firstOrNull() ?: return@transaction null
-            val remaining = hold[OrderHolds.remaining]
-            val event = if (remaining > BigDecimal.ZERO) {
-                releaseLocked(hold[OrderHolds.userId], hold[OrderHolds.asset], remaining, orderId)
-            } else null
-            OrderHolds.update({ OrderHolds.orderId eq orderId }) { it[OrderHolds.remaining] = BigDecimal.ZERO }
-            event
-        }
-        released?.let(eventBus)
-    }
+    private val holdRelease by lazy { LedgerHoldReleaseService(db, eventBus, ::releaseLocked) }
 
-    fun release(userId: String, asset: String, amount: BigDecimal, orderId: String) {
-        val event = transaction(db) { releaseLocked(userId, asset, amount, orderId) }
-        event?.let(eventBus)
+    fun releaseRemainingHold(orderId: String) = holdRelease.releaseRemainingHold(orderId)
+
+    fun release(userId: String, asset: String, amount: BigDecimal, orderId: String) =
+        holdRelease.release(userId, asset, amount, orderId)
+
+    private val tradeSettlement by lazy {
+        LedgerTradeSettlementService(
+            db = db,
+            eventBus = eventBus,
+            consumeHold = ::consumeHold,
+            creditAvailable = ::creditAvailable,
+            debitAvailable = ::debitAvailable,
+            journal = ::journal,
+            assertTxBalanced = ::assertTxBalanced,
+            applyPosition = ::applyPosition
+        )
     }
 
     fun settleTrade(
@@ -283,99 +167,13 @@ class LedgerService(
         price: BigDecimal,
         buyOrderId: String,
         sellOrderId: String
-    ) {
-        require(quantity > BigDecimal.ZERO) { "Trade quantity must be positive" }
-        require(price > BigDecimal.ZERO) { "Trade price must be positive" }
-        val notional = quantity.multiply(price)
-        val firstTime = transaction(db) {
-            val already = Settlements.selectAll().where { Settlements.tradeId eq tradeId }.firstOrNull()
-            if (already != null) return@transaction false
-            if (hasLegacyTradePostings(
-                    tradeId, buyUserId, sellUserId, baseAsset, quoteAsset, quantity, notional
-                )
-            ) {
-                Settlements.insert {
-                    it[Settlements.tradeId] = tradeId
-                    it[createdAt] = Instant.now().toEpochMilli()
-                }
-                log.warn("Repaired missing settlement marker from existing ledger postings tradeId={}", tradeId)
-                return@transaction true
-            }
-            Settlements.insert {
-                it[Settlements.tradeId] = tradeId
-                it[createdAt] = Instant.now().toEpochMilli()
-            }
-            consumeHold(buyOrderId, buyUserId, quoteAsset, notional)
-            consumeHold(sellOrderId, sellUserId, baseAsset, quantity)
-            creditAvailable(buyUserId, baseAsset, quantity)
-            creditAvailable(sellUserId, quoteAsset, notional)
+    ) = tradeSettlement.settleTrade(
+        tradeId, symbol, buyUserId, sellUserId, baseAsset, quoteAsset,
+        quantity, price, buyOrderId, sellOrderId
+    )
 
-            val txId = UUID.randomUUID().toString()
-            journal(txId, buyUserId, quoteAsset, notional, BigDecimal.ZERO, "Trade buy quote trade=$tradeId")
-            journal(txId, sellUserId, quoteAsset, BigDecimal.ZERO, notional, "Trade sell quote trade=$tradeId")
-            journal(txId, sellUserId, baseAsset, quantity, BigDecimal.ZERO, "Trade sell base trade=$tradeId")
-            journal(txId, buyUserId, baseAsset, BigDecimal.ZERO, quantity, "Trade buy base trade=$tradeId")
-            assertTxBalanced(txId)
+    fun isTradeSettled(tradeId: String): Boolean = tradeSettlement.isTradeSettled(tradeId)
 
-            applyPosition(buyUserId, symbol, quantity, price)
-            applyPosition(sellUserId, symbol, quantity.negate(), price)
-            true
-        }
-        if (firstTime) {
-            eventBus(SettlementCompleted(aggregateId = tradeId, tradeId = tradeId))
-        }
-    }
-
-    /**
-     * Older releases could persist balanced trade journal postings without a
-     * settlement marker. On recovery, recognize only the complete four-leg
-     * posting set in one journal transaction; never reapply those balances.
-     */
-    private fun hasLegacyTradePostings(
-        tradeId: String,
-        buyUserId: String,
-        sellUserId: String,
-        baseAsset: String,
-        quoteAsset: String,
-        quantity: BigDecimal,
-        notional: BigDecimal
-    ): Boolean {
-        val marker = "trade=$tradeId"
-        val rows = JournalEntries.selectAll()
-            .where { JournalEntries.description like "%$marker%" }
-            .toList()
-        if (rows.size != 4 || rows.map { it[JournalEntries.txId] }.distinct().size != 1) return false
-
-        fun normalized(value: BigDecimal) = value.stripTrailingZeros().toPlainString()
-        data class Posting(val account: String, val asset: String, val debit: String, val credit: String)
-        val expected = setOf(
-            Posting(buyUserId, quoteAsset, normalized(notional), "0"),
-            Posting(sellUserId, quoteAsset, "0", normalized(notional)),
-            Posting(sellUserId, baseAsset, normalized(quantity), "0"),
-            Posting(buyUserId, baseAsset, "0", normalized(quantity))
-        )
-        val actual = rows.map { row ->
-            Posting(
-                account = row[JournalEntries.account],
-                asset = row[JournalEntries.asset],
-                debit = normalized(row[JournalEntries.debit]),
-                credit = normalized(row[JournalEntries.credit])
-            )
-        }.toSet()
-        return actual == expected
-    }
-
-    fun isTradeSettled(tradeId: String): Boolean = transaction(db) {
-        Settlements.selectAll().where { Settlements.tradeId eq tradeId }.count() > 0
-    }
-
-    /**
-     * Settles one Binance Spot Testnet execution against a locally held amount.
-     * Fill IDs are persisted in Settlements so repeated order polling cannot apply
-     * the same exchange execution twice. The external custody and fee accounts
-     * keep every asset journal balanced while the user's available/held balances
-     * and position reflect the testnet fill.
-     */
     fun settleBinanceTestnetFill(
         executionId: String,
         holdId: String,
@@ -388,140 +186,10 @@ class LedgerService(
         quoteQuantity: BigDecimal,
         commission: BigDecimal,
         commissionAsset: String
-    ): Boolean {
-        require(executionId.length in 1..64) { "Execution id must contain 1 to 64 characters" }
-        require(quantity > BigDecimal.ZERO && quoteQuantity > BigDecimal.ZERO) { "Fill amounts must be positive" }
-        require(commission >= BigDecimal.ZERO) { "Commission cannot be negative" }
-        val normalizedSide = side.uppercase()
-        require(normalizedSide in setOf("BUY", "SELL")) { "Invalid testnet fill side" }
-        val feeAsset = commissionAsset.uppercase()
-        val normalizedBase = baseAsset.uppercase()
-        val normalizedQuote = quoteAsset.uppercase()
-        return transaction(db) {
-            if (Settlements.selectAll().where { Settlements.tradeId eq "binance-testnet:$executionId" }.firstOrNull() != null) {
-                return@transaction false
-            }
-            Settlements.insert {
-                it[Settlements.tradeId] = "binance-testnet:$executionId"
-                it[createdAt] = Instant.now().toEpochMilli()
-            }
-            val baseFee = if (feeAsset == normalizedBase) commission else BigDecimal.ZERO
-            val quoteFee = if (feeAsset == normalizedQuote) commission else BigDecimal.ZERO
-            val txId = UUID.randomUUID().toString()
-            if (normalizedSide == "BUY") {
-                val quoteDebit = quoteQuantity + quoteFee
-                val netBase = quantity - baseFee
-                require(netBase >= BigDecimal.ZERO) { "Base-asset commission exceeds the filled quantity" }
-                consumeHold(holdId, userId, normalizedQuote, quoteDebit)
-                if (netBase > BigDecimal.ZERO) creditAvailable(userId, normalizedBase, netBase)
-                journal(txId, userId, normalizedQuote, quoteDebit, BigDecimal.ZERO, "Binance Testnet buy quote execution=$executionId")
-                journal(txId, "BINANCE_TESTNET_CUSTODY", normalizedQuote, BigDecimal.ZERO, quoteQuantity, "Binance Testnet quote received execution=$executionId")
-                if (quoteFee > BigDecimal.ZERO) {
-                    journal(txId, "BINANCE_TESTNET_FEES", normalizedQuote, BigDecimal.ZERO, quoteFee, "Binance Testnet quote fee execution=$executionId")
-                }
-                journal(txId, "BINANCE_TESTNET_CUSTODY", normalizedBase, quantity, BigDecimal.ZERO, "Binance Testnet base delivered execution=$executionId")
-                if (netBase > BigDecimal.ZERO) journal(txId, userId, normalizedBase, BigDecimal.ZERO, netBase, "Binance Testnet buy base execution=$executionId")
-                if (baseFee > BigDecimal.ZERO) journal(txId, "BINANCE_TESTNET_FEES", normalizedBase, BigDecimal.ZERO, baseFee, "Binance Testnet base fee execution=$executionId")
-                val externalFee = commission - baseFee - quoteFee
-                if (externalFee > BigDecimal.ZERO) {
-                    debitAvailable(userId, feeAsset, externalFee)
-                    journal(txId, userId, feeAsset, externalFee, BigDecimal.ZERO, "Binance Testnet fee execution=$executionId")
-                    journal(txId, "BINANCE_TESTNET_FEES", feeAsset, BigDecimal.ZERO, externalFee, "Binance Testnet external fee execution=$executionId")
-                }
-                assertTxBalanced(txId)
-                if (netBase > BigDecimal.ZERO) {
-                    applyPosition(userId, symbol, netBase, quoteDebit.divide(netBase, 18, java.math.RoundingMode.HALF_UP))
-                }
-            } else {
-                val baseDebit = quantity + baseFee
-                val netQuote = quoteQuantity - quoteFee
-                require(netQuote >= BigDecimal.ZERO) { "Quote-asset commission exceeds the proceeds" }
-                consumeHold(holdId, userId, normalizedBase, baseDebit)
-                if (netQuote > BigDecimal.ZERO) creditAvailable(userId, normalizedQuote, netQuote)
-                journal(txId, userId, normalizedBase, baseDebit, BigDecimal.ZERO, "Binance Testnet sell base execution=$executionId")
-                journal(txId, "BINANCE_TESTNET_CUSTODY", normalizedBase, BigDecimal.ZERO, quantity, "Binance Testnet base received execution=$executionId")
-                if (baseFee > BigDecimal.ZERO) journal(txId, "BINANCE_TESTNET_FEES", normalizedBase, BigDecimal.ZERO, baseFee, "Binance Testnet base fee execution=$executionId")
-                journal(txId, "BINANCE_TESTNET_CUSTODY", normalizedQuote, quoteQuantity, BigDecimal.ZERO, "Binance Testnet quote paid execution=$executionId")
-                if (netQuote > BigDecimal.ZERO) journal(txId, userId, normalizedQuote, BigDecimal.ZERO, netQuote, "Binance Testnet sell quote execution=$executionId")
-                if (quoteFee > BigDecimal.ZERO) journal(txId, "BINANCE_TESTNET_FEES", normalizedQuote, BigDecimal.ZERO, quoteFee, "Binance Testnet quote fee execution=$executionId")
-                val externalFee = commission - baseFee - quoteFee
-                if (externalFee > BigDecimal.ZERO) {
-                    debitAvailable(userId, feeAsset, externalFee)
-                    journal(txId, userId, feeAsset, externalFee, BigDecimal.ZERO, "Binance Testnet fee execution=$executionId")
-                    journal(txId, "BINANCE_TESTNET_FEES", feeAsset, BigDecimal.ZERO, externalFee, "Binance Testnet external fee execution=$executionId")
-                }
-                assertTxBalanced(txId)
-                applyPosition(userId, symbol, baseDebit.negate(), netQuote.divide(baseDebit, 18, java.math.RoundingMode.HALF_UP))
-            }
-            true
-        }
-    }
-
-    fun verifyInvariant(): Boolean = transaction(db) {
-        // Aggregate inside the database. Loading every journal row into Kotlin made
-        // the public health endpoint take seconds as the journal grew.
-        exec(
-            """
-            SELECT asset, SUM(debit) AS debit_total, SUM(credit) AS credit_total
-            FROM journal_entries
-            GROUP BY asset
-            """.trimIndent()
-        ) { resultSet ->
-            var balanced = true
-            while (resultSet.next()) {
-                val debit = resultSet.getBigDecimal("debit_total") ?: BigDecimal.ZERO
-                val credit = resultSet.getBigDecimal("credit_total") ?: BigDecimal.ZERO
-                if (debit.compareTo(credit) != 0) balanced = false
-            }
-            balanced
-        } ?: false
-    }
-
-    /**
-     * Reconciles each user/asset balance (available + held) against that account's
-     * net journal balance. Custody, fee and legacy accounts are controls and have
-     * no spendable balance row.
-     */
-    fun verifyReconciliation(): Boolean = reconciliationReport().ok
-
-    fun reconciliationReport(): ReconciliationReport = transaction(db) {
-        val controlAccounts = setOf("SYSTEM", "LEGACY_UNASSIGNED", "BINANCE_TESTNET_CUSTODY", "BINANCE_TESTNET_FEES")
-        val journalNet = JournalEntries.selectAll()
-            .filter { it[JournalEntries.account] !in controlAccounts }
-            .groupBy { it[JournalEntries.account] to it[JournalEntries.asset] }
-            .mapValues { (_, rows) ->
-                rows.fold(BigDecimal.ZERO) { total, row ->
-                    total + row[JournalEntries.credit] - row[JournalEntries.debit]
-                }
-            }
-        val balanceTotals = Balances.selectAll()
-            .associate { row ->
-                (row[Balances.userId] to row[Balances.asset]) to
-                    (row[Balances.available] + row[Balances.held])
-            }
-
-        val keys = journalNet.keys + balanceTotals.keys
-        val mismatches = keys.mapNotNull { (account, asset) ->
-            val journal = journalNet[account to asset] ?: BigDecimal.ZERO
-            val balance = balanceTotals[account to asset] ?: BigDecimal.ZERO
-            if (journal.compareTo(balance) == 0) null else ReconciliationMismatch(
-                account = account,
-                asset = asset,
-                journalNet = journal.stripTrailingZeros().toPlainString(),
-                balanceTotal = balance.stripTrailingZeros().toPlainString()
-            )
-        }
-        ReconciliationReport(
-            ok = mismatches.isEmpty(),
-            checkedAccountAssets = keys.size,
-            mismatches = mismatches.sortedWith(compareBy({ it.account }, { it.asset }))
-        )
-    }
-
-    fun journalForTx(txId: String): List<Pair<BigDecimal, BigDecimal>> = transaction(db) {
-        JournalEntries.selectAll().where { JournalEntries.txId eq txId }
-            .map { it[JournalEntries.debit] to it[JournalEntries.credit] }
-    }
+    ): Boolean = tradeSettlement.settleBinanceTestnetFill(
+        executionId, holdId, userId, symbol, side, baseAsset, quoteAsset,
+        quantity, quoteQuantity, commission, commissionAsset
+    )
 
     private fun applyPosition(userId: String, symbol: String, qtyDelta: BigDecimal, price: BigDecimal) {
         val existing = Positions.selectAll()

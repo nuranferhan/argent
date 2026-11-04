@@ -13,15 +13,16 @@ import kotlin.system.measureNanoTime
  * Standalone throughput probe (JMH-style timed loop).
  * Run: gradlew :argent-engine:run
  */
-fun main() = runBlocking {
-    val result = MatchingBenchmark.run()
-    println("ARGENT matching benchmark")
-    println("  orders      : ${result.orders}")
-    println("  trades      : ${result.trades}")
-    println("  elapsed ms  : ${result.elapsedMs}")
-    println("  orders/sec  : ${result.ordersPerSecond}")
-    println("  trades/sec  : ${result.tradesPerSecond}")
-}
+fun main() =
+    runBlocking {
+        val result = MatchingBenchmark.run()
+        println("ARGENT matching benchmark")
+        println("  orders      : ${result.orders}")
+        println("  trades      : ${result.trades}")
+        println("  elapsed ms  : ${result.elapsedMs}")
+        println("  orders/sec  : ${result.ordersPerSecond}")
+        println("  trades/sec  : ${result.tradesPerSecond}")
+    }
 
 object MatchingBenchmark {
     data class Result(
@@ -29,7 +30,7 @@ object MatchingBenchmark {
         val trades: Int,
         val elapsedMs: Long,
         val ordersPerSecond: Long,
-        val tradesPerSecond: Long
+        val tradesPerSecond: Long,
     )
 
     suspend fun run(orderCount: Int = 50_000): Result {
@@ -42,12 +43,13 @@ object MatchingBenchmark {
         engine.shutdown()
 
         val live = MatchingEngine(keepRecordedEvents = false, rollbackOnMutationFailure = false)
-        val nanos = measureNanoTime {
-            repeat(orderCount) { i ->
-                val result = live.submit(limit("BTCUSDT", i, i % 2 == 0))
-                trades += result.trades.size
+        val nanos =
+            measureNanoTime {
+                repeat(orderCount) { i ->
+                    val result = live.submit(limit("BTCUSDT", i, i % 2 == 0))
+                    trades += result.trades.size
+                }
             }
-        }
         live.shutdown()
         val ms = TimeUnit.NANOSECONDS.toMillis(nanos).coerceAtLeast(1)
         return Result(
@@ -55,11 +57,15 @@ object MatchingBenchmark {
             trades = trades,
             elapsedMs = ms,
             ordersPerSecond = orderCount * 1000L / ms,
-            tradesPerSecond = trades * 1000L / ms
+            tradesPerSecond = trades * 1000L / ms,
         )
     }
 
-    private fun limit(symbol: String, i: Int, buy: Boolean): Order {
+    private fun limit(
+        symbol: String,
+        i: Int,
+        buy: Boolean,
+    ): Order {
         val mid = BigDecimal("100000")
         val tick = BigDecimal(i % 21 - 10)
         val price = mid + tick
@@ -69,7 +75,7 @@ object MatchingBenchmark {
             side = if (buy) OrderSide.BUY else OrderSide.SELL,
             type = OrderType.LIMIT,
             price = price.toPlainString(),
-            quantity = "0.01"
+            quantity = "0.01",
         )
     }
 }

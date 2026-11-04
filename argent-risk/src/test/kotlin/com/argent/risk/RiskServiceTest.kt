@@ -3,6 +3,9 @@ package com.argent.risk
 import com.argent.common.domain.Order
 import com.argent.common.domain.OrderSide
 import com.argent.common.domain.OrderType
+import com.argent.common.domain.AssetClass
+import com.argent.common.domain.Instrument
+import com.argent.common.domain.Instruments
 import com.argent.ledger.LedgerService
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
@@ -13,6 +16,12 @@ import java.math.BigDecimal
 class RiskServiceTest : FunSpec({
 
     fun risk(): Pair<RiskService, LedgerService> {
+        Instruments.installCatalog(
+            listOf(
+                Instrument("THYAO", "THYAO", "TRY", AssetClass.EQUITY, 0, 2, "0.01", "1", "Turkish Airlines"),
+                Instrument("BTCUSDT", "BTC", "USDT", AssetClass.CRYPTO, 8, 2, "0.01", "0.00000001", "Bitcoin / Tether"),
+            )
+        )
         val ds = HikariDataSource(HikariConfig().apply {
             jdbcUrl = "jdbc:h2:mem:risk_${System.nanoTime()};MODE=PostgreSQL;DB_CLOSE_DELAY=-1"
             maximumPoolSize = 4

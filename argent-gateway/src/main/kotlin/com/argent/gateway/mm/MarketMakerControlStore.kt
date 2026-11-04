@@ -16,24 +16,28 @@ class MarketMakerControlStore(private val db: Database) {
         override val primaryKey = PrimaryKey(id)
     }
 
-    fun initSchema() = transaction(db) {
-        SchemaUtils.createMissingTablesAndColumns(State)
-        State.insertIgnore {
-            it[id] = "default"
-            it[enabled] = true
-            it[updatedAt] = System.currentTimeMillis()
+    fun initSchema() =
+        transaction(db) {
+            SchemaUtils.createMissingTablesAndColumns(State)
+            State.insertIgnore {
+                it[id] = "default"
+                it[enabled] = true
+                it[updatedAt] = System.currentTimeMillis()
+            }
         }
-    }
 
-    fun isEnabled(): Boolean = transaction(db) {
-        State.selectAll().where { State.id eq "default" }.first()[State.enabled]
-    }
-
-    fun setEnabled(value: Boolean) = transaction(db) {
-        val updated = State.update({ State.id eq "default" }) {
-            it[enabled] = value
-            it[updatedAt] = System.currentTimeMillis()
+    fun isEnabled(): Boolean =
+        transaction(db) {
+            State.selectAll().where { State.id eq "default" }.first()[State.enabled]
         }
-        check(updated == 1) { "Market maker control state is not initialized" }
-    }
+
+    fun setEnabled(value: Boolean) =
+        transaction(db) {
+            val updated =
+                State.update({ State.id eq "default" }) {
+                    it[enabled] = value
+                    it[updatedAt] = System.currentTimeMillis()
+                }
+            check(updated == 1) { "Market maker control state is not initialized" }
+        }
 }

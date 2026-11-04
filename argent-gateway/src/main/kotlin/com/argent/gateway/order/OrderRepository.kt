@@ -11,16 +11,15 @@ import org.jetbrains.exposed.sql.SortOrder
 import org.jetbrains.exposed.sql.Table
 import org.jetbrains.exposed.sql.and
 import org.jetbrains.exposed.sql.insert
-import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.or
-import org.jetbrains.exposed.sql.transactions.transaction
+import org.jetbrains.exposed.sql.selectAll
 import org.jetbrains.exposed.sql.transactions.TransactionManager
+import org.jetbrains.exposed.sql.transactions.transaction
 import org.jetbrains.exposed.sql.update
 import java.math.BigDecimal
 import java.time.Instant
 
 class OrderRepository(private val db: Database) {
-
     object Orders : Table("orders") {
         val id = varchar("id", 64)
         val clientOrderId = varchar("client_order_id", 128).nullable()
@@ -59,7 +58,8 @@ class OrderRepository(private val db: Database) {
         transaction(db) {
             // Preserve rows from earlier schemas before adding required maker/taker columns.
             if (isPostgres) {
-                exec("""
+                exec(
+                    """
                     DO ${'$'}${'$'}
                     BEGIN
                         IF to_regclass('trades') IS NOT NULL THEN
@@ -72,54 +72,58 @@ class OrderRepository(private val db: Database) {
                         END IF;
                     END
                     ${'$'}${'$'}
-                """.trimIndent())
+                    """.trimIndent(),
+                )
             }
             SchemaUtils.createMissingTablesAndColumns(Orders, Trades)
             exec(
                 """
                 CREATE UNIQUE INDEX IF NOT EXISTS ux_orders_user_client
                 ON orders (user_id, client_order_id)
-                """.trimIndent()
+                """.trimIndent(),
             )
         }
     }
 
-    fun save(order: Order) = transaction(db) {
-        val existing = Orders.selectAll().where { Orders.id eq order.id }.count() > 0
-        if (existing) {
-            Orders.update({ Orders.id eq order.id }) {
-                it[filledQuantity] = order.filledQuantity
-                it[remainingQuantity] = order.remainingQuantity
-                it[status] = order.status.name
-                it[updatedAt] = Instant.now().toEpochMilli()
-                it[sequence] = order.sequence
-            }
-        } else {
-            Orders.insert {
-                it[id] = order.id
-                it[clientOrderId] = order.clientOrderId
-                it[userId] = order.userId
-                it[symbol] = order.symbol
-                it[side] = order.side.name
-                it[type] = order.type.name
-                it[price] = order.price
-                it[quantity] = order.quantity
-                it[filledQuantity] = order.filledQuantity
-                it[remainingQuantity] = order.remainingQuantity
-                it[status] = order.status.name
-                it[createdAt] = order.createdAt
-                it[updatedAt] = order.updatedAt
-                it[sequence] = order.sequence
+    fun save(order: Order) =
+        transaction(db) {
+            val existing = Orders.selectAll().where { Orders.id eq order.id }.count() > 0
+            if (existing) {
+                Orders.update({ Orders.id eq order.id }) {
+                    it[filledQuantity] = order.filledQuantity
+                    it[remainingQuantity] = order.remainingQuantity
+                    it[status] = order.status.name
+                    it[updatedAt] = Instant.now().toEpochMilli()
+                    it[sequence] = order.sequence
+                }
+            } else {
+                Orders.insert {
+                    it[id] = order.id
+                    it[clientOrderId] = order.clientOrderId
+                    it[userId] = order.userId
+                    it[symbol] = order.symbol
+                    it[side] = order.side.name
+                    it[type] = order.type.name
+                    it[price] = order.price
+                    it[quantity] = order.quantity
+                    it[filledQuantity] = order.filledQuantity
+                    it[remainingQuantity] = order.remainingQuantity
+                    it[status] = order.status.name
+                    it[createdAt] = order.createdAt
+                    it[updatedAt] = order.updatedAt
+                    it[sequence] = order.sequence
+                }
             }
         }
-    }
 
     /** Persist a recovered order snapshot without opening a transaction and doing an existence query per order. */
     fun saveAll(orders: Collection<Order>) {
         if (orders.isEmpty()) return
         transaction(db) {
-            val statement = TransactionManager.current().connection.prepareStatement(
-                """INSERT INTO orders (id, client_order_id, user_id, symbol, side, type, price, quantity,
+            val statement =
+                TransactionManager.current().connection.prepareStatement(
+                    """
+                    INSERT INTO orders (id, client_order_id, user_id, symbol, side, type, price, quantity,
                     filled_quantity, remaining_quantity, status, created_at, updated_at, sequence)
                     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                     ON CONFLICT (id) DO UPDATE SET
@@ -127,23 +131,30 @@ class OrderRepository(private val db: Database) {
                         remaining_quantity = EXCLUDED.remaining_quantity,
                         status = EXCLUDED.status,
                         updated_at = EXCLUDED.updated_at,
-                        sequence = EXCLUDED.sequence""".trimIndent(),
-                false
-            )
+                        sequence = EXCLUDED.sequence
+                    """.trimIndent(),
+                    false,
+                )
             try {
                 var pending = 0
                 orders.forEach { order ->
                     val clientOrderId = order.clientOrderId
                     val price = order.price
                     statement.set(1, order.id)
-                    if (clientOrderId == null) statement.setNull(2, Orders.clientOrderId.columnType)
-                    else statement.set(2, clientOrderId)
+                    if (clientOrderId == null) {
+                        statement.setNull(2, Orders.clientOrderId.columnType)
+                    } else {
+                        statement.set(2, clientOrderId)
+                    }
                     statement.set(3, order.userId)
                     statement.set(4, order.symbol)
                     statement.set(5, order.side.name)
                     statement.set(6, order.type.name)
-                    if (price == null) statement.setNull(7, Orders.price.columnType)
-                    else statement.set(7, price)
+                    if (price == null) {
+                        statement.setNull(7, Orders.price.columnType)
+                    } else {
+                        statement.set(7, price)
+                    }
                     statement.set(8, order.quantity)
                     statement.set(9, order.filledQuantity)
                     statement.set(10, order.remainingQuantity)
@@ -165,126 +176,164 @@ class OrderRepository(private val db: Database) {
         }
     }
 
-    fun saveTrade(trade: Trade) = transaction(db) {
-        val exists = Trades.selectAll().where { Trades.id eq trade.id }.count() > 0
-        if (exists) return@transaction
-        Trades.insert {
-            it[id] = trade.id
-            it[symbol] = trade.symbol
-            it[price] = trade.price
-            it[quantity] = trade.quantity
-            it[buyOrderId] = trade.buyOrderId
-            it[sellOrderId] = trade.sellOrderId
-            it[buyUserId] = trade.buyUserId
-            it[sellUserId] = trade.sellUserId
-            it[makerOrderId] = trade.makerOrderId
-            it[takerOrderId] = trade.takerOrderId
-            it[executedAt] = trade.executedAt
+    fun saveTrade(trade: Trade) =
+        transaction(db) {
+            val exists = Trades.selectAll().where { Trades.id eq trade.id }.count() > 0
+            if (exists) return@transaction
+            Trades.insert {
+                it[id] = trade.id
+                it[symbol] = trade.symbol
+                it[price] = trade.price
+                it[quantity] = trade.quantity
+                it[buyOrderId] = trade.buyOrderId
+                it[sellOrderId] = trade.sellOrderId
+                it[buyUserId] = trade.buyUserId
+                it[sellUserId] = trade.sellUserId
+                it[makerOrderId] = trade.makerOrderId
+                it[takerOrderId] = trade.takerOrderId
+                it[executedAt] = trade.executedAt
+            }
         }
-    }
 
-    fun findById(orderId: String): Order? = transaction(db) {
-        Orders.selectAll().where { Orders.id eq orderId }.map { rowToOrder(it) }.firstOrNull()
-    }
-
-    fun findTrade(tradeId: String): Trade? = transaction(db) {
-        Trades.selectAll().where { Trades.id eq tradeId }.map { rowToTrade(it) }.firstOrNull()
-    }
-
-    fun filledFor(orderId: String): BigDecimal = transaction(db) {
-        Trades.selectAll()
-            .where { (Trades.buyOrderId eq orderId) or (Trades.sellOrderId eq orderId) }
-            .fold(BigDecimal.ZERO) { acc, row -> acc + BigDecimal(row[Trades.quantity]) }
-    }
-
-    fun findByClientOrderId(userId: String, clientOrderId: String): Order? = transaction(db) {
-        Orders.selectAll()
-            .where { (Orders.userId eq userId) and (Orders.clientOrderId eq clientOrderId) }
-            .map { rowToOrder(it) }
-            .firstOrNull()
-    }
-
-    fun findActive(): List<Order> = transaction(db) {
-        Orders.selectAll()
-            .where { Orders.status inList listOf(OrderStatus.ACCEPTED.name, OrderStatus.PARTIALLY_FILLED.name) }
-            .orderBy(Orders.createdAt to SortOrder.ASC, Orders.sequence to SortOrder.ASC, Orders.id to SortOrder.ASC)
-            .map { rowToOrder(it) }
-    }
-
-    fun findActiveByUser(userId: String): List<Order> = transaction(db) {
-        Orders.selectAll()
-            .where {
-                (Orders.userId eq userId) and
-                    (Orders.status inList listOf(OrderStatus.ACCEPTED.name, OrderStatus.PARTIALLY_FILLED.name))
-            }
-            .orderBy(Orders.createdAt to SortOrder.ASC, Orders.sequence to SortOrder.ASC, Orders.id to SortOrder.ASC)
-            .map { rowToOrder(it) }
-    }
-
-    fun findPending(): List<Order> = transaction(db) {
-        Orders.selectAll()
-            .where { Orders.status eq OrderStatus.PENDING.name }
-            .orderBy(Orders.createdAt to SortOrder.ASC, Orders.sequence to SortOrder.ASC, Orders.id to SortOrder.ASC)
-            .map { rowToOrder(it) }
-    }
-
-    fun findByUser(userId: String, limit: Int = 100): List<Order> = transaction(db) {
-        Orders.selectAll()
-            .where { Orders.userId eq userId }
-            .orderBy(Orders.createdAt to SortOrder.DESC)
-            .limit(limit.coerceIn(1, 500))
-            .map { rowToOrder(it) }
-    }
-
-    fun findTrades(symbol: String? = null, userId: String? = null, limit: Int = 100): List<Trade> = transaction(db) {
-        val query = when {
-            symbol != null && userId != null -> Trades.selectAll().where {
-                (Trades.symbol eq symbol) and ((Trades.buyUserId eq userId) or (Trades.sellUserId eq userId))
-            }
-            symbol != null -> Trades.selectAll().where { Trades.symbol eq symbol }
-            userId != null -> Trades.selectAll().where {
-                (Trades.buyUserId eq userId) or (Trades.sellUserId eq userId)
-            }
-            else -> Trades.selectAll()
+    fun findById(orderId: String): Order? =
+        transaction(db) {
+            Orders.selectAll().where { Orders.id eq orderId }.map { rowToOrder(it) }.firstOrNull()
         }
-        query.orderBy(Trades.executedAt to SortOrder.DESC)
-            .limit(limit.coerceIn(1, 500))
-            .map { rowToTrade(it) }
-    }
+
+    fun findTrade(tradeId: String): Trade? =
+        transaction(db) {
+            Trades.selectAll().where { Trades.id eq tradeId }.map { rowToTrade(it) }.firstOrNull()
+        }
+
+    fun filledFor(orderId: String): BigDecimal =
+        transaction(db) {
+            Trades.selectAll()
+                .where { (Trades.buyOrderId eq orderId) or (Trades.sellOrderId eq orderId) }
+                .fold(BigDecimal.ZERO) { acc, row -> acc + BigDecimal(row[Trades.quantity]) }
+        }
+
+    fun findByClientOrderId(
+        userId: String,
+        clientOrderId: String,
+    ): Order? =
+        transaction(db) {
+            Orders.selectAll()
+                .where { (Orders.userId eq userId) and (Orders.clientOrderId eq clientOrderId) }
+                .map { rowToOrder(it) }
+                .firstOrNull()
+        }
+
+    fun findActive(): List<Order> =
+        transaction(db) {
+            Orders.selectAll()
+                .where { Orders.status inList listOf(OrderStatus.ACCEPTED.name, OrderStatus.PARTIALLY_FILLED.name) }
+                .orderBy(
+                    Orders.createdAt to SortOrder.ASC,
+                    Orders.sequence to SortOrder.ASC,
+                    Orders.id to SortOrder.ASC,
+                )
+                .map { rowToOrder(it) }
+        }
+
+    fun findActiveByUser(userId: String): List<Order> =
+        transaction(db) {
+            Orders.selectAll()
+                .where {
+                    (Orders.userId eq userId) and
+                        (Orders.status inList listOf(OrderStatus.ACCEPTED.name, OrderStatus.PARTIALLY_FILLED.name))
+                }
+                .orderBy(
+                    Orders.createdAt to SortOrder.ASC,
+                    Orders.sequence to SortOrder.ASC,
+                    Orders.id to SortOrder.ASC,
+                )
+                .map { rowToOrder(it) }
+        }
+
+    fun findPending(): List<Order> =
+        transaction(db) {
+            Orders.selectAll()
+                .where { Orders.status eq OrderStatus.PENDING.name }
+                .orderBy(
+                    Orders.createdAt to SortOrder.ASC,
+                    Orders.sequence to SortOrder.ASC,
+                    Orders.id to SortOrder.ASC,
+                )
+                .map { rowToOrder(it) }
+        }
+
+    fun findByUser(
+        userId: String,
+        limit: Int = 100,
+    ): List<Order> =
+        transaction(db) {
+            Orders.selectAll()
+                .where { Orders.userId eq userId }
+                .orderBy(Orders.createdAt to SortOrder.DESC)
+                .limit(limit.coerceIn(1, 500))
+                .map { rowToOrder(it) }
+        }
+
+    fun findTrades(
+        symbol: String? = null,
+        userId: String? = null,
+        limit: Int = 100,
+    ): List<Trade> =
+        transaction(db) {
+            val query =
+                when {
+                    symbol != null && userId != null ->
+                        Trades.selectAll().where {
+                            (Trades.symbol eq symbol) and ((Trades.buyUserId eq userId) or (Trades.sellUserId eq userId))
+                        }
+                    symbol != null -> Trades.selectAll().where { Trades.symbol eq symbol }
+                    userId != null ->
+                        Trades.selectAll().where {
+                            (Trades.buyUserId eq userId) or (Trades.sellUserId eq userId)
+                        }
+                    else -> Trades.selectAll()
+                }
+            query.orderBy(Trades.executedAt to SortOrder.DESC)
+                .limit(limit.coerceIn(1, 500))
+                .map { rowToTrade(it) }
+        }
 
     /** Settlement recovery reads persisted trades directly instead of decoding the full event journal. */
-    fun findTradesForRecovery(): List<Trade> = transaction(db) {
-        Trades.selectAll().orderBy(Trades.executedAt to SortOrder.ASC, Trades.id to SortOrder.ASC).map(::rowToTrade)
-    }
+    fun findTradesForRecovery(): List<Trade> =
+        transaction(db) {
+            Trades.selectAll().orderBy(Trades.executedAt to SortOrder.ASC, Trades.id to SortOrder.ASC).map(::rowToTrade)
+        }
 
-    private fun rowToOrder(row: org.jetbrains.exposed.sql.ResultRow) = Order(
-        id = row[Orders.id],
-        clientOrderId = row[Orders.clientOrderId],
-        userId = row[Orders.userId],
-        symbol = row[Orders.symbol],
-        side = OrderSide.valueOf(row[Orders.side]),
-        type = OrderType.valueOf(row[Orders.type]),
-        price = row[Orders.price],
-        quantity = row[Orders.quantity],
-        filledQuantity = row[Orders.filledQuantity],
-        remainingQuantity = row[Orders.remainingQuantity],
-        status = OrderStatus.valueOf(row[Orders.status]),
-        createdAt = row[Orders.createdAt],
-        updatedAt = row[Orders.updatedAt],
-        sequence = row[Orders.sequence]
-    )
+    private fun rowToOrder(row: org.jetbrains.exposed.sql.ResultRow) =
+        Order(
+            id = row[Orders.id],
+            clientOrderId = row[Orders.clientOrderId],
+            userId = row[Orders.userId],
+            symbol = row[Orders.symbol],
+            side = OrderSide.valueOf(row[Orders.side]),
+            type = OrderType.valueOf(row[Orders.type]),
+            price = row[Orders.price],
+            quantity = row[Orders.quantity],
+            filledQuantity = row[Orders.filledQuantity],
+            remainingQuantity = row[Orders.remainingQuantity],
+            status = OrderStatus.valueOf(row[Orders.status]),
+            createdAt = row[Orders.createdAt],
+            updatedAt = row[Orders.updatedAt],
+            sequence = row[Orders.sequence],
+        )
 
-    private fun rowToTrade(row: org.jetbrains.exposed.sql.ResultRow) = Trade(
-        id = row[Trades.id],
-        symbol = row[Trades.symbol],
-        price = row[Trades.price],
-        quantity = row[Trades.quantity],
-        buyOrderId = row[Trades.buyOrderId],
-        sellOrderId = row[Trades.sellOrderId],
-        buyUserId = row[Trades.buyUserId],
-        sellUserId = row[Trades.sellUserId],
-        makerOrderId = row[Trades.makerOrderId],
-        takerOrderId = row[Trades.takerOrderId],
-        executedAt = row[Trades.executedAt]
-    )
+    private fun rowToTrade(row: org.jetbrains.exposed.sql.ResultRow) =
+        Trade(
+            id = row[Trades.id],
+            symbol = row[Trades.symbol],
+            price = row[Trades.price],
+            quantity = row[Trades.quantity],
+            buyOrderId = row[Trades.buyOrderId],
+            sellOrderId = row[Trades.sellOrderId],
+            buyUserId = row[Trades.buyUserId],
+            sellUserId = row[Trades.sellUserId],
+            makerOrderId = row[Trades.makerOrderId],
+            takerOrderId = row[Trades.takerOrderId],
+            executedAt = row[Trades.executedAt],
+        )
 }

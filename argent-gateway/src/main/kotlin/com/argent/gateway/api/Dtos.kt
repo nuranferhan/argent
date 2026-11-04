@@ -1,13 +1,17 @@
 package com.argent.gateway.api
 
-import com.argent.common.domain.Balance
 import kotlinx.serialization.Serializable
 
 @Serializable
 data class RegisterRequest(val email: String, val password: String, val displayName: String)
 
 @Serializable
-data class InvitationRegistrationRequest(val email: String, val password: String, val displayName: String, val token: String)
+data class InvitationRegistrationRequest(
+    val email: String,
+    val password: String,
+    val displayName: String,
+    val token: String,
+)
 
 @Serializable
 data class LoginRequest(val email: String, val password: String)
@@ -16,7 +20,11 @@ data class LoginRequest(val email: String, val password: String)
 data class GoogleLoginRequest(val idToken: String, val nonce: String)
 
 @Serializable
-data class GoogleAuthConfigResponse(val configured: Boolean, val webClientId: String? = null, val desktopClientId: String? = null)
+data class GoogleAuthConfigResponse(
+    val configured: Boolean,
+    val webClientId: String? = null,
+    val desktopClientId: String? = null,
+)
 
 @Serializable
 data class GoogleNonceResponse(val nonce: String)
@@ -57,7 +65,7 @@ data class MarketMakerStatusResponse(
     val mode: String,
     val quoteNotionalCap: String,
     val inventoryNotionalCap: String,
-    val staleQuoteTtlMs: Long
+    val staleQuoteTtlMs: Long,
 )
 
 @Serializable
@@ -69,7 +77,7 @@ data class TenantInvitationDto(
     val email: String,
     val role: String,
     val token: String,
-    val expiresAt: Long
+    val expiresAt: Long,
 )
 
 @Serializable
@@ -79,7 +87,7 @@ data class PlaceOrderRequest(
     val type: String = "LIMIT",
     val price: String? = null,
     val quantity: String,
-    val clientOrderId: String? = null
+    val clientOrderId: String? = null,
 )
 
 @Serializable
@@ -87,14 +95,14 @@ data class DepositRequest(
     val userId: String,
     val asset: String,
     val amount: String,
-    val idempotencyKey: String? = null
+    val idempotencyKey: String? = null,
 )
 
 @Serializable
 data class WithdrawRequest(
     val asset: String,
     val amount: String,
-    val idempotencyKey: String? = null
+    val idempotencyKey: String? = null,
 )
 
 @Serializable
@@ -107,14 +115,14 @@ data class HealthResponse(
     val matchingEngine: Boolean = true,
     val executionMode: String = "INTERNAL_MATCHING",
     val cryptoMarketData: String = "CONNECTING",
-    val bistMarketData: String = "UNAVAILABLE"
+    val bistMarketData: String = "UNAVAILABLE",
 )
 
 @Serializable
 data class LedgerReconciliationResponse(
     val ok: Boolean,
     val checkedAccountAssets: Int,
-    val mismatches: List<LedgerReconciliationMismatchDto>
+    val mismatches: List<LedgerReconciliationMismatchDto>,
 )
 
 @Serializable
@@ -122,7 +130,7 @@ data class LedgerReconciliationMismatchDto(
     val account: String,
     val asset: String,
     val journalNet: String,
-    val balanceTotal: String
+    val balanceTotal: String,
 )
 
 @Serializable data class BinanceTestnetOrderRequest(
@@ -132,9 +140,11 @@ data class LedgerReconciliationMismatchDto(
     val quantity: String,
     val price: String? = null,
     val timeInForce: String = "GTC",
-    val clientOrderId: String? = null
+    val clientOrderId: String? = null,
 )
+
 @Serializable data class BinanceTestnetStatusResponse(val configured: Boolean, val environment: String = "SPOT_TESTNET", val usesArgentLedger: Boolean = true)
+
 @Serializable data class BistHistoricalReplayRequest(val csv: String, val speed: Int = 1000)
 
 @Serializable
@@ -145,7 +155,7 @@ data class TickerResponse(
     val ask: String? = null,
     val volume24h: String? = null,
     val source: String? = null,
-    val timestamp: Long = 0
+    val timestamp: Long = 0,
 )
 
 @Serializable
@@ -159,11 +169,18 @@ data class TokenResponse(
     val accessToken: String,
     val refreshToken: String,
     val expiresIn: Long,
-    val tokenType: String = "Bearer"
+    val tokenType: String = "Bearer",
 )
 
 @Serializable
-data class MeResponse(val userId: String, val email: String, val displayName: String, val role: String, val tenantId: String, val tenantRole: String)
+data class MeResponse(
+    val userId: String,
+    val email: String,
+    val displayName: String,
+    val role: String,
+    val tenantId: String,
+    val tenantRole: String,
+)
 
 @Serializable
 data class CancelResponse(val status: String, val orderId: String)
@@ -178,7 +195,7 @@ data class TradeInfo(
     val sellOrderId: String,
     val makerOrderId: String,
     val takerOrderId: String,
-    val executedAt: Long
+    val executedAt: Long,
 )
 
 @Serializable
@@ -189,16 +206,26 @@ data class AssistantQuestionRequest(
     val draftType: String? = null,
     val draftQuantity: String? = null,
     val draftPrice: String? = null,
-    val language: String = "tr"
+    val language: String = "tr",
 )
 
 @Serializable data class AssistantOrderDraftRequest(val prompt: String)
+
 @Serializable data class ConfirmAssistantOrderRequest(val password: String, val acknowledgeSummary: Boolean)
+
 @Serializable data class AssistantOrderDraftResponse(
-    val draftId: String, val symbol: String, val side: String, val type: String,
-    val quantity: String, val price: String, val quoteNotional: String,
-    val quoteAsset: String, val source: String, val dataAsOf: Long, val expiresAt: Long,
-    val note: String = "Bu yalnızca taslaktır; gönderim için ayrıca onay gerekir."
+    val draftId: String,
+    val symbol: String,
+    val side: String,
+    val type: String,
+    val quantity: String,
+    val price: String,
+    val quoteNotional: String,
+    val quoteAsset: String,
+    val source: String,
+    val dataAsOf: Long,
+    val expiresAt: Long,
+    val note: String = "Bu yalnızca taslaktır; gönderim için ayrıca onay gerekir.",
 )
 
 @Serializable
@@ -210,7 +237,7 @@ data class AssistantAnswerResponse(
     val generatedAt: Long,
     val dataAsOf: Long,
     val sources: List<String>,
-    val marketMode: String
+    val marketMode: String,
 )
 
 @Serializable
@@ -219,7 +246,7 @@ data class AssistantAlertsResponse(
     val generatedAt: Long,
     val dataAsOf: Long,
     val sources: List<String>,
-    val marketMode: String
+    val marketMode: String,
 )
 
 @Serializable
@@ -230,7 +257,7 @@ data class OrderResultResponse(
     val remainingQuantity: String,
     val accepted: Boolean,
     val reason: String,
-    val trades: List<TradeInfo>
+    val trades: List<TradeInfo>,
 )
 
 @Serializable
@@ -239,7 +266,7 @@ data class ReplayResponse(
     val events: Int,
     val restingOrders: Int,
     val bestBid: String? = null,
-    val bestAsk: String? = null
+    val bestAsk: String? = null,
 )
 
 @Serializable
@@ -250,5 +277,23 @@ data class InstrumentDto(
     val assetClass: String,
     val displayName: String,
     val tickSize: String,
-    val lotSize: String
+    val lotSize: String,
+    val active: Boolean = true,
+    val expiryDate: String? = null,
+    val referencePrice: String? = null,
+)
+
+@Serializable
+data class InstrumentUpsertRequest(
+    val baseAsset: String,
+    val quoteAsset: String,
+    val assetClass: String,
+    val qtyScale: Int,
+    val priceScale: Int,
+    val tickSize: String,
+    val lotSize: String,
+    val displayName: String,
+    val active: Boolean = true,
+    val expiryDate: String? = null,
+    val referencePrice: String? = null,
 )

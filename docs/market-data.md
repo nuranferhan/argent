@@ -2,9 +2,13 @@
 
 ARGENT, piyasa verisi ve emir yürütme için ayrı akışlar kullanır: Binance public crypto kotasyonları, canlı feed olmadığında paper-simulated BIST ve ek enstrüman fiyatları, isteğe bağlı sağlayıcı kaynaklı BIST kotasyonları, kullanıcı tarafından sağlanan BIST geçmiş verisi replay'i, dahili matching ve Binance Spot Testnet'e gönderilen emirler. Piyasa verisi, gerçek parayla işlem yapıldığı anlamına gelmez.
 
-## Public crypto fiyatları
+## Genel erişime açık kripto fiyatları
 
 Varsayılan ayar `MARKET_DATA_MODE=BINANCE_PUBLIC` değeridir: gerçek crypto ticker'ları Binance public WebSocket üzerinden API key olmadan alınır. BIST fiyatları varsayılan olarak başlangıç değerleri belirlenmiş, paper etiketi taşıyan ve küçük bir random walk kullanan simülasyonla üretilir. `ISTFIN_BIST` seçildiğinde canlı kotasyon eksik veya eskiyse bu fallback çalışmaya devam eder; güncel sağlayıcı kotasyonları önceliklidir. Borsa İstanbul piyasa verisini yetkili veri dağıtım şirketleri üzerinden sunar. Public bir web sayfası veya resmi olmayan scraper, ARGENT'te feed gösterme izninin yerine geçmez. İsteğe bağlı istfin adapter'ı API key ve sağlayıcı yetkisi gerektirir; etkinleştirmeden önce güncel fiyatı, gecikmeyi, yetki kapsamını ve gösterim haklarını doğrulayın. Sağlayıcı key'ini yok sayılan yerel `.env` dosyasında veya deployment secret store içinde tutun; commit etmeyin. Normal ARGENT emirleri BIST'e değil dahili matching engine'e gider. `MARKET_DATA_MODE=SIMULATED`, her enstrüman için paper fiyatlarını seçer. Nasdaq referans kotasyonları ve haber başlıkları Finnhub API key ile etkinleştirilebilir; sağlayıcı limitleri ve gösterim lisansı geçerlidir. Binance Spot Testnet emir yürütmesi ayrı yapılandırılır ve yalnızca Testnet'e ait kimlik bilgilerini kullanır.
+
+Paper fiyat üretimi `MARKET_SIMULATION_SEED` ile tekrarlanabilir. Varsayılan seed `10645015`'tir; farklı bir değer verilirse yeniden başlatmalarda aynı başlangıç koşulundan türeyen farklı bir paper akışı oluşur. Bu ayar gerçek piyasa verisi sağlamaz.
+
+Kapanan mumlar Flyway `V2__market_candles.sql` migration'ıyla kurulan `market_candles` tablosunda sembol/aralık/açılış zamanı anahtarıyla saklanır. Gateway `GET /api/v1/candles/{symbol}/{interval}` üzerinden `1m`, `5m`, `15m`, `60m` ve `1d` aralıklarını, en fazla 2.000 mumla sunar. Büyük aralıklar kapanan 1 dakikalık mumlardan türetilir; yazımlar toplu yapılır. Grafik geçmişi ve teknik analiz, mevcut olduğunda saklanan 1 dakikalık mumları kullanır. 1 dakikalık mumlar 30 gün, daha büyük aralıklar 5 yıl saklanır.
 
 Yerel geliştirme için key'i yok sayılan kök `.env` dosyasına ekleyip gateway'i yeniden derleyin. Key'i sohbete yapıştırmayın veya commit etmeyin:
 

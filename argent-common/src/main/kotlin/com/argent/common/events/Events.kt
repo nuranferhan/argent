@@ -22,7 +22,7 @@ data class OrderSubmitted(
     override val occurredAt: Long = Instant.now().toEpochMilli(),
     override val aggregateId: String,
     override val sequence: Long = 0,
-    val order: Order
+    val order: Order,
 ) : DomainEvent()
 
 @Serializable
@@ -32,7 +32,7 @@ data class OrderAccepted(
     override val occurredAt: Long = Instant.now().toEpochMilli(),
     override val aggregateId: String,
     override val sequence: Long = 0,
-    val order: Order
+    val order: Order,
 ) : DomainEvent()
 
 @Serializable
@@ -43,7 +43,7 @@ data class OrderRejected(
     override val aggregateId: String,
     override val sequence: Long = 0,
     val orderId: String,
-    val reason: String
+    val reason: String,
 ) : DomainEvent()
 
 @Serializable
@@ -54,7 +54,7 @@ data class OrderCancelled(
     override val aggregateId: String,
     override val sequence: Long = 0,
     val orderId: String,
-    val reason: String = "User cancelled"
+    val reason: String = "User cancelled",
 ) : DomainEvent()
 
 @Serializable
@@ -64,7 +64,7 @@ data class TradeExecuted(
     override val occurredAt: Long = Instant.now().toEpochMilli(),
     override val aggregateId: String,
     override val sequence: Long = 0,
-    val trade: Trade
+    val trade: Trade,
 ) : DomainEvent()
 
 @Serializable
@@ -76,7 +76,7 @@ data class FundsHeld(
     override val sequence: Long = 0,
     val orderId: String,
     val asset: String,
-    val amount: String
+    val amount: String,
 ) : DomainEvent()
 
 @Serializable
@@ -88,7 +88,7 @@ data class FundsReleased(
     override val sequence: Long = 0,
     val orderId: String,
     val asset: String,
-    val amount: String
+    val amount: String,
 ) : DomainEvent()
 
 @Serializable
@@ -98,7 +98,7 @@ data class SettlementCompleted(
     override val occurredAt: Long = Instant.now().toEpochMilli(),
     override val aggregateId: String,
     override val sequence: Long = 0,
-    val tradeId: String
+    val tradeId: String,
 ) : DomainEvent()
 
 @Serializable
@@ -111,5 +111,5 @@ data class MarginCall(
     val userId: String,
     val marginRatio: String,
     val equity: String,
-    val quoteAsset: String = ""
+    val quoteAsset: String = "",
 ) : DomainEvent()

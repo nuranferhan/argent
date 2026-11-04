@@ -1,89 +1,31 @@
 package com.argent.gateway
 
-import com.argent.common.domain.Instruments
-import com.argent.engine.MatchingEngine
-import com.argent.core.ArgentMatchingCore
-import com.argent.engine.OrderBookDepth
-import com.argent.gateway.api.CancelResponse
-import com.argent.gateway.api.BinanceTestnetOrderRequest
-import com.argent.gateway.api.BinanceTestnetStatusResponse
-import com.argent.gateway.api.BistHistoricalReplayRequest
-import com.argent.gateway.api.DepositRequest
-import com.argent.gateway.api.ErrorResponse
-import com.argent.gateway.api.HealthResponse
-import com.argent.gateway.api.InstrumentDto
-import com.argent.gateway.api.LoginRequest
-import com.argent.gateway.api.GoogleLoginRequest
-import com.argent.gateway.api.GoogleAuthConfigResponse
-import com.argent.gateway.api.GoogleNonceResponse
-import com.argent.gateway.api.LedgerReconciliationResponse
-import com.argent.gateway.api.LedgerReconciliationMismatchDto
-import com.argent.gateway.api.MeResponse
-import com.argent.common.events.TradeExecuted
 import com.argent.common.events.DomainEvent
-import com.argent.common.events.OrderAccepted
-import com.argent.common.events.OrderCancelled
-import com.argent.common.events.OrderRejected
-import com.argent.common.events.OrderSubmitted
-import com.argent.gateway.api.PlaceOrderRequest
-import com.argent.gateway.api.ReplayResponse
-import com.argent.gateway.api.RefreshRequest
-import com.argent.gateway.api.TenantSwitchRequest
-import com.argent.gateway.api.TenantInviteRequest
-import com.argent.gateway.api.TenantInviteAcceptRequest
-import com.argent.gateway.api.TenantMembershipDto
-import com.argent.gateway.api.TenantInvitationDto
-import com.argent.gateway.api.TenantMemberDto
-import com.argent.gateway.api.TenantRoleUpdateRequest
-import com.argent.gateway.api.TenantRoleUpdateResponse
-import com.argent.gateway.api.TenantMemberRevokedResponse
-import com.argent.gateway.api.TenantWorkspaceClosedResponse
-import com.argent.gateway.api.MarketMakerStatusResponse
-import com.argent.gateway.api.MarketMakerActionResponse
-import com.argent.gateway.api.RegisterRequest
-import com.argent.gateway.api.InvitationRegistrationRequest
-import com.argent.gateway.api.RegisterResponse
-import com.argent.gateway.api.TickerResponse
-import com.argent.gateway.api.TokenResponse
-import com.argent.gateway.api.TradeInfo
-import com.argent.gateway.api.AssistantQuestionRequest
-import com.argent.gateway.api.AssistantOrderDraftRequest
-import com.argent.gateway.api.AssistantOrderDraftResponse
-import com.argent.gateway.api.ConfirmAssistantOrderRequest
-import com.argent.gateway.api.AssistantStatusResponse
-import com.argent.gateway.api.AssistantAlertsResponse
-import com.argent.gateway.api.WithdrawRequest
+import com.argent.core.ArgentMatchingCore
+import com.argent.engine.MatchingEngine
+import com.argent.gateway.api.ErrorResponse
+import com.argent.gateway.assistant.AssistantOrderDraftService
+import com.argent.gateway.assistant.AssistantPortfolioHistoryStore
+import com.argent.gateway.assistant.ReadOnlyAssistantService
 import com.argent.gateway.auth.AuthService
 import com.argent.gateway.auth.GoogleIdentityService
-import com.argent.gateway.assistant.ReadOnlyAssistantService
-import com.argent.gateway.assistant.AssistantPortfolioHistoryStore
-import com.argent.gateway.assistant.AssistantDraftOrder
-import com.argent.gateway.assistant.AssistantOrderDraftService
-import com.argent.gateway.auth.UserRole
 import com.argent.gateway.auth.TenantRole
 import com.argent.gateway.config.AppConfig
 import com.argent.gateway.event.PostgresEventStore
+import com.argent.gateway.market.CandleStore
+import com.argent.gateway.market.DailyFxRatesService
+import com.argent.gateway.market.ExternalMarketDataService
+import com.argent.gateway.market.PriceAlertStore
 import com.argent.gateway.mm.LiquidityProvider
 import com.argent.gateway.mm.MarketMakerControlStore
 import com.argent.gateway.order.OrderRepository
 import com.argent.gateway.ratelimit.RedisRateLimiter
 import com.argent.gateway.security.ClientAddressResolver
-import com.argent.gateway.trading.TradingService
 import com.argent.gateway.trading.BinanceTestnetExecutionService
-import com.argent.ledger.LedgerService
+import com.argent.gateway.trading.TradingService
+import com.argent.market.BinanceSpotTestnet
 import com.argent.market.EventBroker
 import com.argent.market.MarketDataService
-import com.argent.market.MarketFeedMode
-import com.argent.market.TickerUpdate
-import com.argent.market.TechnicalAnalysis
-import com.argent.market.BinanceSpotTestnet
-import com.argent.market.BinanceTestnetException
-import com.argent.gateway.market.ExternalMarketDataService
-import com.argent.gateway.market.DailyFxRatesService
-import com.argent.gateway.market.PriceAlertStore
-import com.argent.gateway.market.CreatePriceAlertRequest
-import com.argent.gateway.market.toResponse
-import com.argent.market.TestnetOrderRequest
 import com.argent.risk.RiskService
 import com.auth0.jwt.JWT
 import com.auth0.jwt.algorithms.Algorithm
@@ -94,13 +36,12 @@ import io.ktor.http.HttpHeaders
 import io.ktor.http.HttpMethod
 import io.ktor.http.HttpStatusCode
 import io.ktor.serialization.kotlinx.json.json
-import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.application.ApplicationCall
+import io.ktor.server.application.ApplicationCallPipeline
 import io.ktor.server.application.call
 import io.ktor.server.application.install
 import io.ktor.server.auth.Authentication
 import io.ktor.server.auth.Principal
-import io.ktor.server.auth.authenticate
 import io.ktor.server.auth.jwt.jwt
 import io.ktor.server.auth.principal
 import io.ktor.server.engine.embeddedServer
@@ -113,21 +54,11 @@ import io.ktor.server.plugins.statuspages.StatusPages
 import io.ktor.server.request.header
 import io.ktor.server.request.httpMethod
 import io.ktor.server.request.path
-import io.ktor.server.request.receive
 import io.ktor.server.response.respond
-import io.ktor.server.response.respondBytes
 import io.ktor.server.response.respondText
-import io.ktor.server.response.respondTextWriter
-import io.ktor.server.routing.delete
 import io.ktor.server.routing.get
-import io.ktor.server.routing.post
-import io.ktor.server.routing.patch
-import io.ktor.server.routing.route
 import io.ktor.server.routing.routing
 import io.ktor.server.websocket.WebSockets
-import io.ktor.server.websocket.webSocket
-import io.ktor.websocket.CloseReason
-import io.ktor.websocket.Frame
 import io.ktor.websocket.close
 import io.micrometer.prometheusmetrics.PrometheusConfig
 import io.micrometer.prometheusmetrics.PrometheusMeterRegistry
@@ -136,23 +67,25 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
-import kotlinx.coroutines.runBlocking
-import kotlinx.coroutines.channels.Channel
-import kotlinx.coroutines.withTimeoutOrNull
-import kotlinx.serialization.json.Json
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.json.Json
+import org.flywaydb.core.Flyway
 import org.jetbrains.exposed.sql.Database
 import org.slf4j.LoggerFactory
 import java.math.BigDecimal
-import java.security.MessageDigest
 import kotlin.time.Duration.Companion.seconds
 
 private val log = LoggerFactory.getLogger("ArgentGateway")
-private val json = Json { prettyPrint = false; ignoreUnknownKeys = true; encodeDefaults = true }
+private val json =
+    Json {
+        prettyPrint = false
+        ignoreUnknownKeys = true
+        encodeDefaults = true
+    }
 
 private class MissingAuthenticatedPrincipal : RuntimeException()
 
-private fun ApplicationCall.requireArgentPrincipal(): ArgentPrincipal =
+internal fun ApplicationCall.requireArgentPrincipal(): ArgentPrincipal =
     principal<ArgentPrincipal>() ?: throw MissingAuthenticatedPrincipal()
 
 @Serializable
@@ -162,13 +95,24 @@ data class ArgentPrincipal(val userId: String, val role: String, val tenantId: S
 
 fun main() {
     val config = AppConfig.load()
-    val ds = HikariDataSource(HikariConfig().apply {
-        jdbcUrl = config.jdbcUrl
-        username = config.dbUser
-        password = config.dbPass
-        maximumPoolSize = 16
-        isAutoCommit = false
-    })
+    val ds =
+        HikariDataSource(
+            HikariConfig().apply {
+                jdbcUrl = config.jdbcUrl
+                username = config.dbUser
+                password = config.dbPass
+                maximumPoolSize = 16
+                isAutoCommit = false
+            },
+        )
+    Flyway.configure()
+        .dataSource(ds)
+        .locations("classpath:db/migration")
+        .baselineOnMigrate(true)
+        .baselineVersion("0")
+        .load()
+        .migrate()
+    val instrumentCatalog = InstrumentCatalogStore(ds).also { it.loadIntoCache() }
     val database = Database.connect(ds)
     val broker = EventBroker(config.rabbitUrl).also { it.start() }
     val eventStore = PostgresEventStore(database).also { it.initSchema() }
@@ -183,12 +127,23 @@ fun main() {
     val googleIdentity = GoogleIdentityService(config.googleOAuthClientIds)
     val orders = OrderRepository(database).also { it.initSchema() }
     val engine = core.matchingEngine
-    val market = MarketDataService(feedMode = config.marketFeedMode, istfinApiKey = config.istfinApiKey).also { it.start() }
+    // The production candle table is provisioned by Flyway (V2__market_candles.sql).
+    // Keep initSchema available for isolated H2 tests, but do not mutate production schema at startup.
+    val candleStore = CandleStore(database).also { it.prune() }
+    val market =
+        MarketDataService(
+            feedMode = config.marketFeedMode,
+            istfinApiKey = config.istfinApiKey,
+            candleSink = candleStore::persistClosed,
+        ).also { it.start() }
     val binanceTestnet = BinanceSpotTestnet(config.binanceSpotTestnetApiKey, config.binanceSpotTestnetSecret)
     val risk = RiskService(ledger)
     val dailyFxRates = DailyFxRatesService()
-    suspend fun portfolioSnapshot(accountId: String, prices: Map<String, java.math.BigDecimal>) =
-        dailyFxRates.snapshot().let { fx -> risk.portfolio(accountId, prices, fx.usdPerCurrency, fx.date) }
+
+    suspend fun portfolioSnapshot(
+        accountId: String,
+        prices: Map<String, java.math.BigDecimal>,
+    ) = dailyFxRates.snapshot().let { fx -> risk.portfolio(accountId, prices, fx.usdPerCurrency, fx.date) }
     val assistant = ReadOnlyAssistantService.fromEnvironment()
     val assistantOrderDrafts = AssistantOrderDraftService()
     val externalMarketData = ExternalMarketDataService(System.getenv("FINNHUB_API_KEY")?.takeIf(String::isNotBlank))
@@ -196,21 +151,30 @@ fun main() {
     val assistantPortfolioHistory = AssistantPortfolioHistoryStore(database).also { it.initSchema() }
     val prometheus = PrometheusMeterRegistry(PrometheusConfig.DEFAULT)
     val trading = TradingService(engine, ledger, risk, orders, market, prometheus)
+    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
+    startInstrumentMaintenance(appScope, instrumentCatalog, trading, ledger)
     val limiter = RedisRateLimiter(config.redisUrl)
     val clientAddressResolver = ClientAddressResolver(config.trustedProxyCidrs)
-    val appScope = CoroutineScope(SupervisorJob() + Dispatchers.Default)
-    if (externalMarketData.status().configured) appScope.launch {
-        while (true) {
-            priceAlertStore.activeSymbols().forEach { symbol ->
-                runCatching {
-                    val quote = externalMarketData.quote(symbol)
-                    priceAlertStore.trigger(symbol, quote.price, quote.timestamp)
-                }.onFailure { log.debug("Price alert polling for {} deferred: {}", symbol, it.message) }
+    startCandleRetention(appScope, candleStore)
+    if (externalMarketData.status().configured) {
+        appScope.launch {
+            while (true) {
+                priceAlertStore.activeSymbols().forEach { symbol ->
+                    runCatching {
+                        val quote = externalMarketData.quote(symbol)
+                        priceAlertStore.trigger(symbol, quote.price, quote.timestamp)
+                    }.onFailure { log.debug("Price alert polling for {} deferred: {}", symbol, it.message) }
+                }
+                delay(60_000)
             }
-            delay(60_000)
         }
     }
-    val binanceTestnetExecution = BinanceTestnetExecutionService(database, ledger, binanceTestnet).also { it.initSchema() }
+    val binanceTestnetExecution =
+        BinanceTestnetExecutionService(
+            database,
+            ledger,
+            binanceTestnet,
+        ).also { it.initSchema() }
     if (binanceTestnet.configured) {
         appScope.launch {
             while (true) {
@@ -222,774 +186,181 @@ fun main() {
     }
 
     bootstrap(config, auth, ledger)
-    runBlocking {
-        val recoveryStartedAt = System.nanoTime()
-        val pendingAtStartup = orders.findPending()
-        val recoverySymbols = pendingAtStartup.mapTo(mutableSetOf()) { it.symbol }
-        log.info("Restoring active books from SQL order snapshots; replaying only {} pending symbols", recoverySymbols.size)
-        val snapshots = recoverySymbols.associateWith(eventStore::loadBookSnapshot)
-        val history = recoverySymbols.flatMap { symbol ->
-            val checkpoint = snapshots[symbol]
-            eventStore.loadForAggregateAfter(symbol, checkpoint?.lastEventSequence ?: 0L)
-        }.sortedBy { it.sequence }
-        log.info("Loaded {} recovery events in {} ms", history.size, (System.nanoTime() - recoveryStartedAt) / 1_000_000)
-        val replayableOrderIds = history.filterIsInstance<OrderSubmitted>().map { it.order.id }.toSet() +
-            snapshots.values.filterNotNull().flatMap { snapshot -> snapshot.orders.map { it.id } }
-        val replayedEvents = mutableListOf<com.argent.common.events.DomainEvent>()
-        // Replay is read-only with respect to the durable event store. Capture its
-        // regenerated fills for settlement recovery without retaining a second
-        // unbounded event history in the engine.
-        val recoveryEngine = core.newMatchingEngine(eventSink = replayedEvents::add, keepRecordedEvents = false, rollbackOnMutationFailure = false)
-        val replayStartedAt = System.nanoTime()
-        snapshots.values.filterNotNull().flatMap { it.orders }.forEach { recoveryEngine.restore(it) }
-        val replayResults = recoveryEngine.replay(history)
-        val recoveredBookOrders = recoverySymbols.flatMap { symbol -> recoveryEngine.snapshot(symbol) }
-        val recoveredOrders = (replayResults + recoveredBookOrders).distinctBy { it.id }
-        log.info("Replayed {} domain events into {} order snapshots in {} ms", history.size, recoveredOrders.size, (System.nanoTime() - replayStartedAt) / 1_000_000)
-        val persistStartedAt = System.nanoTime()
-        orders.saveAll(recoveredOrders.associateBy { it.id }.values)
-        log.info("Persisted recovered orders in {} ms", (System.nanoTime() - persistStartedAt) / 1_000_000)
-        val persistedTrades = orders.findTradesForRecovery().map { trade ->
-            TradeExecuted(aggregateId = trade.symbol, trade = trade)
-        }
-        val unsettled = (replayedEvents.filterIsInstance<TradeExecuted>() + persistedTrades)
-            .distinctBy { it.trade.id }
-            .filterNot { ledger.isTradeSettled(it.trade.id) }
-        trading.recoverUnsettled(unsettled)
-        recoveryEngine.shutdown()
-
-        orders.findPending().forEach { pending ->
-            if (pending.id in replayableOrderIds) {
-                error("Order ${pending.id} remains pending after event replay; refusing to start with unresolved funds")
-            }
-            log.error("Rejecting pending order without a durable submission event id={}", pending.id)
-            orders.save(pending.copy(status = com.argent.common.domain.OrderStatus.REJECTED))
-            ledger.releaseRemainingHold(pending.id)
-        }
-
-        ledger.activeHoldOrderIds().forEach { orderId ->
-            val order = orders.findById(orderId)
-            if (order == null || order.status !in setOf(
-                    com.argent.common.domain.OrderStatus.PENDING,
-                    com.argent.common.domain.OrderStatus.ACCEPTED,
-                    com.argent.common.domain.OrderStatus.PARTIALLY_FILLED
-                )
-            ) {
-                log.error("Releasing orphaned funds hold orderId={}", orderId)
-                ledger.releaseRemainingHold(orderId)
-            }
-        }
-
-        val active = (orders.findActive().filterNot { it.symbol in recoverySymbols } + recoveredOrders.filter {
-            it.status in setOf(com.argent.common.domain.OrderStatus.ACCEPTED, com.argent.common.domain.OrderStatus.PARTIALLY_FILLED)
-        }).distinctBy { it.id }
-        log.info("Recovering {} active orders", active.size)
-        active.forEach { engine.restore(it) }
-        (recoverySymbols + active.map { it.symbol }).forEach { symbol ->
-            eventStore.saveBookSnapshot(symbol, active.filter { it.symbol == symbol })
-        }
-    }
+    recoverGatewayState(core, eventStore, orders, ledger, trading, engine)
 
     var liquidityProvider: LiquidityProvider? = null
     if (config.seedMarketMaker) {
         val mm = auth.findByEmail("mm@argent.local")
         if (mm != null) {
             val controlStore = MarketMakerControlStore(database).also { it.initSchema() }
-            liquidityProvider = LiquidityProvider(mm.id, trading, engine, market, orders, ledger, appScope, controlStore).also { it.start() }
+            liquidityProvider =
+                LiquidityProvider(mm.id, trading, engine, market, orders, ledger, appScope, controlStore).also {
+                    it.start()
+                }
             log.info("Liquidity provider started id={}", mm.id)
         }
     }
 
-    val server = embeddedServer(Netty, port = config.port, host = config.bindHost) {
-        install(ContentNegotiation) { json(json) }
-        install(CORS) {
-            config.corsHosts.forEach { allowHost(it, schemes = listOf("http", "https")) }
-            allowHeader(HttpHeaders.ContentType)
-            allowHeader(HttpHeaders.Authorization)
-            allowHeader("Idempotency-Key")
-            allowMethod(HttpMethod.Options)
-            allowMethod(HttpMethod.Get)
-            allowMethod(HttpMethod.Post)
-            allowMethod(HttpMethod.Patch)
-            allowMethod(HttpMethod.Delete)
-        }
-        install(CallLogging)
-        install(StatusPages) {
-            exception<MissingAuthenticatedPrincipal> { call, _ ->
-                call.respond(HttpStatusCode.Unauthorized, ErrorResponse("Authentication required"))
-            }
-            exception<IllegalArgumentException> { call, cause ->
-                call.respond(HttpStatusCode.BadRequest, ErrorResponse(cause.message ?: "Bad request"))
-            }
-            exception<Throwable> { call, cause ->
-                log.error("Unhandled", cause)
-                call.respond(HttpStatusCode.InternalServerError, ErrorResponse("Internal error"))
-            }
-        }
-        install(WebSockets) {
-            pingPeriodMillis = 15_000
-            timeoutMillis = 30_000
-        }
-        install(MicrometerMetrics) { registry = prometheus }
-        install(Authentication) {
-            jwt("auth") {
-                verifier(JWT.require(Algorithm.HMAC256(config.jwtSecret)).build())
-                validate { cred ->
-                    val userId = cred.payload.getClaim("userId").asString() ?: cred.payload.subject
-                    val user = userId?.let(auth::getUser)?.takeIf { it.active }
-                    val tenantId = cred.payload.getClaim("tenantId").asString() ?: user?.tenantId
-                    val access = if (user != null && tenantId != null) auth.tenantAccess(user.id, tenantId) else null
-                    val accountId = cred.payload.getClaim("accountId").asString()
-                    val tenantRole = cred.payload.getClaim("tenantRole").asString()
-                    if (user != null && access != null && tenantId != null && accountId == access.accountId && tenantRole == access.role.name) {
-                        ArgentPrincipal(user.id, user.role.name, tenantId, access.role, access.accountId)
-                    } else null
-                }
-            }
-        }
+    val routeContext =
+        GatewayRouteContext(
+            config = config,
+            dataSource = ds,
+            instrumentCatalog = instrumentCatalog,
+            broker = broker,
+            limiter = limiter,
+            auth = auth,
+            externalMarketData = externalMarketData,
+            priceAlertStore = priceAlertStore,
+            trading = trading,
+            portfolioSnapshot = { accountId, prices -> portfolioSnapshot(accountId, prices) },
+            market = market,
+            assistant = assistant,
+            assistantPortfolioHistory = assistantPortfolioHistory,
+            assistantOrderDrafts = assistantOrderDrafts,
+            orders = orders,
+            eventStore = eventStore,
+            core = core,
+            engine = engine,
+            ledger = ledger,
+            risk = risk,
+            binanceTestnet = binanceTestnet,
+            binanceTestnetExecution = binanceTestnetExecution,
+            liquidityProvider = liquidityProvider,
+            json = json,
+        )
 
-        intercept(ApplicationCallPipeline.Plugins) {
-            val path = call.request.path()
-            val skip = path == "/" || path == "/health" || path == "/metrics"
-            if (skip) return@intercept
-            val remoteHost = clientAddressResolver.resolve(call.request.local.remoteHost, call.request.header("X-Forwarded-For"))
-            val (bucket, requestLimit) = when (path) {
-                "/api/v1/auth/login" -> "auth:login" to 10
-                "/api/v1/auth/register" -> "auth:register" to 5
-                "/api/v1/auth/google/nonce" -> "auth:google-nonce" to 10
-                "/api/v1/auth/google" -> "auth:google" to 10
-                "/api/v1/auth/register/invitation" -> "auth:invitation" to 10
-                "/api/v1/auth/refresh" -> "auth:refresh" to 20
-                "/api/v1/assistant/chat" -> "api:assistant" to 20
-                else -> if (call.request.httpMethod == HttpMethod.Get) {
-                    // The desktop terminal polls several read endpoints every second. A single
-                    // IP-wide 120/minute bucket throttles normal UI use (and users behind NAT).
-                    // Keep reads bounded per route, while preserving a shared write limit below.
-                    "api:read:$path" to 300
-                } else {
-                    "api:write" to 120
-                }
+    val server =
+        embeddedServer(Netty, port = config.port, host = config.bindHost) {
+            install(ContentNegotiation) { json(json) }
+            install(CORS) {
+                config.corsHosts.forEach { allowHost(it, schemes = listOf("http", "https")) }
+                allowHeader(HttpHeaders.ContentType)
+                allowHeader(HttpHeaders.Authorization)
+                allowHeader("Idempotency-Key")
+                allowMethod(HttpMethod.Options)
+                allowMethod(HttpMethod.Get)
+                allowMethod(HttpMethod.Post)
+                allowMethod(HttpMethod.Patch)
+                allowMethod(HttpMethod.Delete)
             }
-            if (!limiter.allow("$bucket:$remoteHost", requestLimit)) {
-                call.respond(HttpStatusCode.TooManyRequests, ErrorResponse("Rate limit exceeded"))
-                finish()
-            }
-        }
-
-        routing {
-            get("/") {
-                call.respondText("ARGENT Multi-Asset Trading & Settlement Platform", ContentType.Text.Plain)
-            }
-            get("/health") {
-                if (!config.isDev && !secureTokenMatches(config.observabilityToken, call.request.header(HttpHeaders.Authorization))) {
-                    return@get call.respond(HttpStatusCode.Unauthorized, ErrorResponse("Observability credentials required"))
+            install(CallLogging)
+            install(StatusPages) {
+                exception<MissingAuthenticatedPrincipal> { call, _ ->
+                    call.respond(HttpStatusCode.Unauthorized, ErrorResponse("Authentication required"))
                 }
-                val invariant = try { ledger.verifyInvariant() } catch (failure: Exception) {
-                    log.error("Ledger invariant check failed", failure)
-                    false
-                }
-                val postgres = runCatching { ds.connection.use { it.isValid(2) } }
-                    .onFailure { log.warn("PostgreSQL health check failed: {}", it.message) }
-                    .getOrDefault(false)
-                val redis = limiter.ping()
-                val rabbit = broker.isConnected()
-                val matchingEngine = engine.isHealthy()
-                val healthy = invariant && postgres && redis && rabbit && matchingEngine
-                call.respond(
-                    HealthResponse(
-                        status = if (healthy) "UP" else "DEGRADED",
-                        invariantOk = invariant,
-                        redis = redis,
-                        postgres = postgres,
-                        rabbit = rabbit,
-                        matchingEngine = matchingEngine,
-                        executionMode = "INTERNAL_MATCHING",
-                        cryptoMarketData = market.cryptoFeedStatus(),
-                        bistMarketData = market.bistFeedStatus()
-                    )
-                )
-            }
-            get("/metrics") {
-                if (!config.isDev && !secureTokenMatches(config.observabilityToken, call.request.header(HttpHeaders.Authorization))) {
-                    return@get call.respond(HttpStatusCode.Unauthorized, ErrorResponse("Observability credentials required"))
-                }
-                call.respondText(prometheus.scrape())
-            }
-
-            marketReadRoutes(market, engine, orders, externalMarketData, json)
-            get("/api/v1/auth/google/config") {
-                call.respond(GoogleAuthConfigResponse(googleIdentity.configured(), config.googleWebClientId, config.googleDesktopClientId))
-            }
-            get("/api/v1/auth/google/nonce") {
-                if (!googleIdentity.configured()) return@get call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse("Google ile giriş için OAuth istemci kimliklerini yapılandırın"))
-                call.respond(GoogleNonceResponse(googleIdentity.issueNonce()))
-            }
-            post("/api/v1/auth/register") {
-                if (!config.publicSignupEnabled) return@post call.respond(HttpStatusCode.Forbidden, ErrorResponse("Yeni hesap kaydı şu anda kapalı"))
-                val body = call.receive<RegisterRequest>()
-                val result = auth.registerPublic(body.email, body.password, body.displayName)
-                seedPublicPaperBalance(ledger, result.user.id)
-                val tokens = result.tokens
-                call.respond(HttpStatusCode.Created, TokenResponse(tokens.accessToken, tokens.refreshToken, tokens.expiresInSeconds))
-            }
-            post("/api/v1/auth/google") {
-                if (!config.publicSignupEnabled) return@post call.respond(HttpStatusCode.Forbidden, ErrorResponse("Yeni hesap kaydı şu anda kapalı"))
-                val body = call.receive<GoogleLoginRequest>()
-                val profile = googleIdentity.verify(body.idToken, body.nonce)
-                val result = auth.loginWithGoogle(profile)
-                if (result.created) seedPublicPaperBalance(ledger, result.accountId)
-                val tokens = result.tokens
-                call.respond(TokenResponse(tokens.accessToken, tokens.refreshToken, tokens.expiresInSeconds))
-            }
-            post("/api/v1/auth/register/invitation") {
-                val body = call.receive<InvitationRegistrationRequest>()
-                val tokens = auth.registerFromInvitation(body.email, body.password, body.displayName, body.token)
-                call.respond(HttpStatusCode.Created, TokenResponse(tokens.accessToken, tokens.refreshToken, tokens.expiresInSeconds))
-            }
-            post("/api/v1/auth/login") {
-                val body = call.receive<LoginRequest>()
-                val tokens = auth.login(body.email, body.password)
-                seedBalanceForPublicTrader(ledger, tokens.accessToken)
-                call.respond(TokenResponse(tokens.accessToken, tokens.refreshToken, tokens.expiresInSeconds))
-            }
-            post("/api/v1/auth/refresh") {
-                val body = call.receive<RefreshRequest>()
-                val tokens = auth.refresh(body.refreshToken)
-                call.respond(TokenResponse(tokens.accessToken, tokens.refreshToken, tokens.expiresInSeconds))
-            }
-            post("/api/v1/auth/logout") {
-                val body = call.receive<RefreshRequest>()
-                call.respond(mapOf("revoked" to auth.revokeRefreshToken(body.refreshToken)))
-            }
-
-            authenticate("auth") {
-                get("/api/v1/external-market/nasdaq/{symbol}") {
-                    val symbol = call.parameters["symbol"] ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("Sembol gerekli"))
-                    val quote = runCatching { externalMarketData.quote(symbol) }.getOrElse {
-                        val status = if (it.message?.contains("yapılandırılmamış") == true) HttpStatusCode.ServiceUnavailable else HttpStatusCode.BadGateway
-                        return@get call.respond(status, ErrorResponse(it.message ?: "Nasdaq verisi alınamadı"))
-                    }
-                    call.respond(quote)
-                }
-                get("/api/v1/external-market/news") {
-                    val category = call.request.queryParameters["category"] ?: "general"
-                    val news = runCatching { externalMarketData.news(category) }.getOrElse {
-                        val status = if (it.message?.contains("yapılandırılmamış") == true) HttpStatusCode.ServiceUnavailable else HttpStatusCode.BadGateway
-                        return@get call.respond(status, ErrorResponse(it.message ?: "Haber akışı alınamadı"))
-                    }
-                    call.respond(news)
-                }
-                get("/api/v1/external-market/news-image") {
-                    val imageUrl = call.request.queryParameters["url"]
-                        ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("Haber görseli gerekli"))
-                    val image = runCatching { externalMarketData.image(imageUrl) }.getOrNull()
-                        ?: return@get call.respond(HttpStatusCode.NotFound, ErrorResponse("Haber görseli alınamadı"))
-                    call.respondBytes(image.bytes, io.ktor.http.ContentType.parse(image.contentType))
-                }
-                get("/api/v1/price-alerts") {
-                    val p = call.requireArgentPrincipal()
-                    call.respond(priceAlertStore.list(p.userId).map { it.toResponse() })
-                }
-                post("/api/v1/price-alerts") {
-                    val p = call.requireArgentPrincipal()
-                    val request = call.receive<CreatePriceAlertRequest>()
-                    val symbol = request.symbol.trim().uppercase()
-                    val direction = request.direction.trim().uppercase()
-                    require(externalMarketData.status().configured) { "Gerçek fiyat alarmı için FINNHUB_API_KEY yapılandırılmalı" }
-                    require(symbol in ExternalMarketDataService.NASDAQ_WATCHLIST) { "Alarm yalnızca desteklenen Nasdaq sembollerinde kullanılabilir" }
-                    require(direction in setOf("ABOVE", "BELOW")) { "direction ABOVE veya BELOW olmalı" }
-                    val threshold = request.threshold.trim().replace(',', '.').toBigDecimalOrNull()
-                        ?: throw IllegalArgumentException("Eşik pozitif bir sayı olmalı")
-                    require(threshold.signum() > 0 && threshold.precision() <= 18 && threshold.scale() <= 8) { "Eşik pozitif olmalı ve en fazla 8 ondalık basamak içermeli" }
-                    require(priceAlertStore.list(p.userId).count { it.state == "ACTIVE" } < 20) { "En fazla 20 etkin fiyat alarmı oluşturabilirsiniz" }
-                    val currentQuote = runCatching { externalMarketData.quote(symbol) }.getOrElse {
-                        return@post call.respond(HttpStatusCode.BadGateway, ErrorResponse(it.message ?: "Gerçek fiyat doğrulanamadı; alarm kurulmadı"))
-                    }
-                    val created = priceAlertStore.create(p.userId, symbol, direction, threshold.stripTrailingZeros().toPlainString())
-                    priceAlertStore.trigger(symbol, currentQuote.price, currentQuote.timestamp)
-                    call.respond(HttpStatusCode.Created, priceAlertStore.list(p.userId).first { it.id == created.id }.toResponse())
-                }
-                delete("/api/v1/price-alerts/{id}") {
-                    val p = call.requireArgentPrincipal()
-                    val id = call.parameters["id"] ?: return@delete call.respond(HttpStatusCode.BadRequest, ErrorResponse("Alarm kimliği gerekli"))
-                    if (!priceAlertStore.delete(p.userId, id)) return@delete call.respond(HttpStatusCode.NotFound, ErrorResponse("Alarm bulunamadı"))
-                    call.respond(mapOf("deleted" to true))
-                }
-                get("/api/v1/me") {
-                    val p = call.requireArgentPrincipal()
-                    val user = auth.getUser(p.userId) ?: return@get call.respond(HttpStatusCode.NotFound, ErrorResponse("User not found"))
-                    call.respond(MeResponse(user.id, user.email, user.displayName, user.role.name, p.tenantId, p.tenantRole.name))
-                }
-                get("/api/v1/tenants") {
-                    val p = call.requireArgentPrincipal()
-                    call.respond(auth.memberships(p.userId).map { TenantMembershipDto(it.tenantId, it.tenantName, it.role.name) })
-                }
-                get("/api/v1/tenants/members") {
-                    val p = call.requireArgentPrincipal()
-                    if (p.tenantRole !in setOf(TenantRole.OWNER, TenantRole.ADMIN)) {
-                        return@get call.respond(HttpStatusCode.Forbidden, ErrorResponse("Tenant administrator role required"))
-                    }
-                    call.respond(auth.tenantMembers(p.tenantId, p.userId).map {
-                        TenantMemberDto(it.userId, it.email, it.displayName, it.role.name)
-                    })
-                }
-                patch("/api/v1/tenants/members/{userId}/role") {
-                    val p = call.requireArgentPrincipal()
-                    if (p.tenantRole !in setOf(TenantRole.OWNER, TenantRole.ADMIN)) {
-                        return@patch call.respond(HttpStatusCode.Forbidden, ErrorResponse("Tenant administrator role required"))
-                    }
-                    val targetUserId = call.parameters["userId"] ?: throw IllegalArgumentException("userId is required")
-                    val body = call.receive<TenantRoleUpdateRequest>()
-                    val newRole = runCatching { TenantRole.valueOf(body.role.trim().uppercase()) }.getOrElse {
-                        throw IllegalArgumentException("Role must be ADMIN, TRADER, or VIEWER")
-                    }
-                    val targetAccess = auth.tenantAccess(targetUserId, p.tenantId)
-                        ?: return@patch call.respond(HttpStatusCode.NotFound, ErrorResponse("Tenant member not found"))
-                    trading.withAccountLock(targetAccess.accountId) {
-                        auth.updateTenantRole(p.tenantId, p.userId, targetUserId, newRole)
-                    }
-                    call.respond(TenantRoleUpdateResponse(targetUserId, newRole.name, true))
-                }
-                delete("/api/v1/tenants/members/{userId}") {
-                    val p = call.requireArgentPrincipal()
-                    if (p.tenantRole !in setOf(TenantRole.OWNER, TenantRole.ADMIN)) {
-                        return@delete call.respond(HttpStatusCode.Forbidden, ErrorResponse("Tenant administrator role required"))
-                    }
-                    val targetUserId = call.parameters["userId"] ?: throw IllegalArgumentException("userId is required")
-                    val target = auth.tenantAccess(targetUserId, p.tenantId)
-                        ?: return@delete call.respond(HttpStatusCode.NotFound, ErrorResponse("Tenant member not found"))
-                    val revoked = trading.withAccountLock(target.accountId) {
-                        orders.findActiveByUser(target.accountId).forEach { order ->
-                            trading.cancel(target.accountId, order.id, order.symbol)
-                        }
-                        if (orders.findActiveByUser(target.accountId).isNotEmpty()) false
-                        else {
-                            auth.deactivateMember(p.tenantId, p.userId, targetUserId)
-                            true
-                        }
-                    }
-                    if (!revoked) return@delete call.respond(HttpStatusCode.Conflict, ErrorResponse("Active orders could not all be cancelled; membership remains active"))
-                    call.respond(TenantMemberRevokedResponse(targetUserId, true, true))
-                }
-                delete("/api/v1/tenants/current") {
-                    val p = call.requireArgentPrincipal()
-                    if (p.tenantRole != TenantRole.OWNER) {
-                        return@delete call.respond(HttpStatusCode.Forbidden, ErrorResponse("Workspace owner role required"))
-                    }
-                    val closed = trading.withAccountLock(p.accountId) {
-                        orders.findActiveByUser(p.accountId).forEach { order ->
-                            trading.cancel(p.accountId, order.id, order.symbol)
-                        }
-                        if (orders.findActiveByUser(p.accountId).isNotEmpty()) false
-                        else {
-                            auth.deactivateWorkspace(p.tenantId, p.userId)
-                            true
-                        }
-                    }
-                    if (!closed) return@delete call.respond(HttpStatusCode.Conflict, ErrorResponse("Active orders could not all be cancelled; workspace remains open"))
-                    call.respond(TenantWorkspaceClosedResponse(p.tenantId, true))
-                }
-                post("/api/v1/tenants/switch") {
-                    val p = call.requireArgentPrincipal()
-                    val body = call.receive<TenantSwitchRequest>()
-                    val tokens = auth.switchTenant(p.userId, body.tenantId)
-                    call.respond(TokenResponse(tokens.accessToken, tokens.refreshToken, tokens.expiresInSeconds))
-                }
-                post("/api/v1/tenants/invitations") {
-                    val p = call.requireArgentPrincipal()
-                    val body = call.receive<TenantInviteRequest>()
-                    val role = runCatching { TenantRole.valueOf(body.role.trim().uppercase()) }.getOrElse {
-                        throw IllegalArgumentException("Tenant role must be TRADER or VIEWER")
-                    }
-                    val invitation = auth.createInvitation(p.tenantId, p.userId, body.email, role)
+                exception<MatchingEngine.EngineOverloadedException> { call, _ ->
+                    call.response.headers.append(HttpHeaders.RetryAfter, "1")
                     call.respond(
-                        HttpStatusCode.Created,
-                        TenantInvitationDto(invitation.tenantId, invitation.email, invitation.role.name, invitation.token, invitation.expiresAt)
+                        HttpStatusCode.ServiceUnavailable,
+                        ErrorResponse("Matching engine is busy; retry shortly"),
                     )
                 }
-                post("/api/v1/tenants/invitations/accept") {
-                    val p = call.requireArgentPrincipal()
-                    val body = call.receive<TenantInviteAcceptRequest>()
-                    val member = auth.acceptInvitation(p.userId, body.token)
-                    call.respond(TenantMembershipDto(member.tenantId, member.tenantName, member.role.name))
+                exception<IllegalArgumentException> { call, cause ->
+                    call.respond(HttpStatusCode.BadRequest, ErrorResponse(cause.message ?: "Bad request"))
                 }
-                get("/api/v1/balances") {
-                    val p = call.requireArgentPrincipal()
-                    call.respond(ledger.listBalances(p.accountId))
+                exception<Throwable> { call, cause ->
+                    log.error("Unhandled", cause)
+                    call.respond(HttpStatusCode.InternalServerError, ErrorResponse("Internal error"))
                 }
-                get("/api/v1/positions") {
-                    val p = call.requireArgentPrincipal()
-                    call.respond(ledger.listPositions(p.accountId))
-                }
-                get("/api/v1/portfolio") {
-                    val p = call.requireArgentPrincipal()
-                    val snapshot = portfolioSnapshot(p.accountId, market.allLastPrices())
-                    runCatching { assistantPortfolioHistory.recordAndGetDailyBaseline(p.accountId, snapshot, System.currentTimeMillis()) }
-                        .onFailure { log.warn("Could not record assistant portfolio sample", it) }
-                    call.respond(snapshot)
-                }
-                get("/api/v1/assistant/status") {
-                    call.respond(AssistantStatusResponse(assistant.enabled, assistant.statusProvider(), if (assistant.enabled) assistant.model else null))
-                }
-                get("/api/v1/assistant/alerts") {
-                    val p = call.requireArgentPrincipal()
-                    val requestedSymbol = call.request.queryParameters["symbol"]?.trim()?.uppercase()?.takeIf(String::isNotBlank)
-                    if (requestedSymbol != null && Instruments.all.none { it.symbol == requestedSymbol }) {
-                        return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("Bilinmeyen sembol: $requestedSymbol"))
-                    }
-                    val now = System.currentTimeMillis()
-                    val prices = market.allLastPrices()
-                    val snapshot = portfolioSnapshot(p.accountId, prices)
-                    val baseline = assistantPortfolioHistory.recordAndGetDailyBaseline(p.accountId, snapshot, now)
-                    val ticker = requestedSymbol?.let(market::lastTicker)
-                    val bistMode = market.bistFeedStatus()
-                    val marketMode = "CRYPTO ${market.cryptoFeedStatus()} · BIST $bistMode"
-                    val sources = buildList {
-                        add("ARGENT portföy ve sanal defter")
-                        add(marketMode)
-                        ticker?.let { add("${it.source} piyasa verisi: ${it.symbol}") }
-                    }
-                    call.respond(AssistantAlertsResponse(
-                        alerts = assistant.currentAlerts(snapshot, ticker, marketMode, now, baseline),
-                        generatedAt = now,
-                        dataAsOf = ticker?.timestamp ?: now,
-                        sources = sources,
-                        marketMode = marketMode
-                    ))
-                }
-                post("/api/v1/assistant/chat") {
-                    val p = call.requireArgentPrincipal()
-                    if (!assistant.enabled) {
-                        return@post call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse("ARGENT AI yapılandırılmamış; gateway ortamına ARGENT_AI_API_KEY ekleyin."))
-                    }
-                    val request = call.receive<AssistantQuestionRequest>()
-                    val question = request.question.trim()
-                    if (question.isBlank() || question.length > 1200) {
-                        return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("Soru boş olamaz ve 1200 karakteri aşamaz."))
-                    }
-                    val symbol = request.symbol?.trim()?.uppercase()?.takeIf(String::isNotBlank)
-                    if (symbol != null && Instruments.all.none { it.symbol == symbol }) {
-                        return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("Bilinmeyen sembol: $symbol"))
-                    }
-                    val ticker = symbol?.let(market::lastTicker)
-                    val draftOrder = runCatching {
-                        val side = request.draftSide?.trim()?.uppercase() ?: return@runCatching null
-                        val type = request.draftType?.trim()?.uppercase() ?: return@runCatching null
-                        val quantity = request.draftQuantity?.trim()?.replace(',', '.') ?: return@runCatching null
-                        require(side in setOf("BUY", "SELL") && type in setOf("LIMIT", "MARKET"))
-                        require(BigDecimal(quantity).signum() > 0)
-                        val price = request.draftPrice?.trim()?.replace(',', '.')?.takeIf(String::isNotBlank)
-                        if (type == "LIMIT") require(price != null && BigDecimal(price).signum() > 0)
-                        AssistantDraftOrder(side, type, quantity, price)
-                    }.getOrNull()
-                    val bistMode = market.bistFeedStatus()
-                    val marketMode = "CRYPTO ${market.cryptoFeedStatus()} · BIST $bistMode"
-                    val answer = runCatching {
-                        val portfolioSnapshot = portfolioSnapshot(p.accountId, market.allLastPrices())
-                        val baseline = assistantPortfolioHistory.recordAndGetDailyBaseline(p.accountId, portfolioSnapshot, System.currentTimeMillis())
-                        assistant.answer(
-                            question = question,
-                            symbol = symbol,
-                            portfolio = portfolioSnapshot,
-                            orders = orders.findByUser(p.accountId, 500),
-                            fills = orders.findTrades(userId = p.accountId, limit = 500),
-                            ticker = ticker,
-                            recentPrices = symbol?.let(market::history).orEmpty(),
-                            depth = symbol?.let { engine.depth(it, 5) },
-                            marketMode = marketMode,
-                            dailyBaseline = baseline,
-                            draftOrder = draftOrder,
-                            responseLanguage = request.language
-                        )
-                    }.getOrElse {
-                        log.warn("Read-only ARGENT AI request failed: {}", it.message)
-                        return@post call.respond(HttpStatusCode.BadGateway, ErrorResponse(it.message ?: "ARGENT AI yanıt veremedi."))
-                    }
-                    call.respond(answer)
-                }
-                post("/api/v1/assistant/order-drafts") {
-                    val p = call.requireArgentPrincipal()
-                    if (p.tenantRole !in setOf(TenantRole.OWNER, TenantRole.ADMIN, TenantRole.TRADER)) {
-                        return@post call.respond(HttpStatusCode.Forbidden, ErrorResponse("Trading permission required"))
-                    }
-                    val body = call.receive<AssistantOrderDraftRequest>()
-                    val draft = assistantOrderDrafts.create(p.accountId, body.prompt, market)
-                    call.respond(HttpStatusCode.Created, draft)
-                }
-                post("/api/v1/assistant/order-drafts/{draftId}/confirm") {
-                    val p = call.requireArgentPrincipal()
-                    if (!engine.isHealthy()) return@post call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse("Eşleştirme motoru sağlıklı değil; emir gönderilmedi."))
-                    if (p.tenantRole !in setOf(TenantRole.OWNER, TenantRole.ADMIN, TenantRole.TRADER)) {
-                        return@post call.respond(HttpStatusCode.Forbidden, ErrorResponse("Trading permission required"))
-                    }
-                    val body = call.receive<ConfirmAssistantOrderRequest>()
-                    if (!body.acknowledgeSummary) return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("Emir özeti açıkça onaylanmalı."))
-                    if (!auth.verifyPassword(p.userId, body.password)) return@post call.respond(HttpStatusCode.Unauthorized, ErrorResponse("Parola doğrulanamadı; emir gönderilmedi."))
-                    val draftId = call.parameters["draftId"] ?: return@post call.respond(HttpStatusCode.BadRequest, ErrorResponse("Taslak kimliği gerekli."))
-                    val result = trading.withAccountLock(p.accountId) {
-                        val current = auth.tenantAccess(p.userId, p.tenantId)
-                        if (current == null || current.accountId != p.accountId || current.role !in setOf(TenantRole.OWNER, TenantRole.ADMIN, TenantRole.TRADER)) null
-                        else trading.placeOrder(p.accountId, assistantOrderDrafts.confirm(p.accountId, draftId))
-                    } ?: return@post call.respond(HttpStatusCode.Forbidden, ErrorResponse("Tenant trading permission is no longer active"))
-                    call.respond(result)
-                }
-                get("/api/v1/orders") {
-                    val p = call.requireArgentPrincipal()
-                    call.respond(orders.findByUser(p.accountId))
-                }
-                get("/api/v1/fills") {
-                    val p = call.requireArgentPrincipal()
-                    call.respond(
-                        orders.findTrades(userId = p.accountId).map {
-                            TradeInfo(it.id, it.symbol, it.price, it.quantity, it.buyOrderId, it.sellOrderId, it.makerOrderId, it.takerOrderId, it.executedAt)
-                        }
-                    )
-                }
-                post("/api/v1/orders") {
-                    if (!engine.isHealthy()) {
-                        return@post call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse("Matching is paused after an internal failure; restart the gateway to replay durable events"))
-                    }
-                    val p = call.requireArgentPrincipal()
-                    if (p.tenantRole !in setOf(TenantRole.OWNER, TenantRole.ADMIN, TenantRole.TRADER)) {
-                        return@post call.respond(HttpStatusCode.Forbidden, ErrorResponse("Trading permission required"))
-                    }
-                    val req = call.receive<PlaceOrderRequest>()
-                    val headerKey = call.request.header("Idempotency-Key")
-                    require(headerKey.isNullOrBlank() || req.clientOrderId.isNullOrBlank() || headerKey == req.clientOrderId) {
-                        "Idempotency-Key must match clientOrderId when both are provided"
-                    }
-                    val effective = if (req.clientOrderId.isNullOrBlank() && !headerKey.isNullOrBlank()) {
-                        req.copy(clientOrderId = headerKey)
-                    } else req
-                    require(!effective.clientOrderId.isNullOrBlank() && effective.clientOrderId.length <= 128) {
-                        "Provide an Idempotency-Key or clientOrderId between 1 and 128 characters"
-                    }
-                    val result = trading.withAccountLock(p.accountId) {
-                        val current = auth.tenantAccess(p.userId, p.tenantId)
-                        if (current == null || current.accountId != p.accountId || current.role !in setOf(TenantRole.OWNER, TenantRole.ADMIN, TenantRole.TRADER)) null
-                        else trading.placeOrder(p.accountId, effective)
-                    } ?: return@post call.respond(HttpStatusCode.Forbidden, ErrorResponse("Tenant trading permission is no longer active"))
-                    call.respond(result)
-                }
-                delete("/api/v1/orders/{orderId}") {
-                    if (!engine.isHealthy()) {
-                        return@delete call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse("Matching is paused after an internal failure; restart the gateway to replay durable events"))
-                    }
-                    val p = call.requireArgentPrincipal()
-                    if (p.tenantRole !in setOf(TenantRole.OWNER, TenantRole.ADMIN, TenantRole.TRADER)) {
-                        return@delete call.respond(HttpStatusCode.Forbidden, ErrorResponse("Trading permission required"))
-                    }
-                    val orderId = call.parameters["orderId"] ?: throw IllegalArgumentException("Order id is required")
-                    val symbol = call.request.queryParameters["symbol"]?.uppercase()
-                        ?: return@delete call.respond(HttpStatusCode.BadRequest, ErrorResponse("symbol query param required"))
-                    val cancelled = trading.withAccountLock(p.accountId) {
-                        val current = auth.tenantAccess(p.userId, p.tenantId)
-                        current != null && current.accountId == p.accountId && current.role in setOf(TenantRole.OWNER, TenantRole.ADMIN, TenantRole.TRADER) &&
-                            trading.cancel(p.accountId, orderId, symbol)
-                    }
-                    if (cancelled) {
-                        call.respond(CancelResponse("cancelled", orderId))
-                    } else {
-                        call.respond(HttpStatusCode.NotFound, ErrorResponse("Order not found or not in book"))
-                    }
-                }
-                post("/api/v1/withdraw") {
-                    call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse("External withdrawal settlement is not configured; no withdrawal was processed"))
-                }
-                post("/api/v1/admin/deposit") {
-                    call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse("External deposit verification is not configured; no funds were credited"))
-                }
-                get("/api/v1/admin/ledger/reconciliation") {
-                    val p = call.requireArgentPrincipal()
-                    if (p.role != UserRole.ADMIN.name) return@get call.respond(HttpStatusCode.Forbidden, ErrorResponse("Admin only"))
-                    val report = ledger.reconciliationReport()
-                    call.respond(
-                        LedgerReconciliationResponse(
-                            ok = report.ok,
-                            checkedAccountAssets = report.checkedAccountAssets,
-                            mismatches = report.mismatches.map {
-                                LedgerReconciliationMismatchDto(it.account, it.asset, it.journalNet, it.balanceTotal)
+            }
+            install(WebSockets) {
+                pingPeriodMillis = 15_000
+                timeoutMillis = 30_000
+            }
+            install(MicrometerMetrics) { registry = prometheus }
+            install(Authentication) {
+                jwt("auth") {
+                    verifier(JWT.require(Algorithm.HMAC256(config.jwtSecret)).build())
+                    validate { cred ->
+                        val userId = cred.payload.getClaim("userId").asString() ?: cred.payload.subject
+                        val user = userId?.let(auth::getUser)?.takeIf { it.active }
+                        val tenantId = cred.payload.getClaim("tenantId").asString() ?: user?.tenantId
+                        val access =
+                            if (user != null && tenantId != null) {
+                                auth.tenantAccess(
+                                    user.id,
+                                    tenantId,
+                                )
+                            } else {
+                                null
                             }
-                        )
-                    )
-                }
-                get("/api/v1/admin/binance-spot-testnet") {
-                    val p = call.requireArgentPrincipal()
-                    if (p.role != UserRole.ADMIN.name) return@get call.respond(HttpStatusCode.Forbidden, ErrorResponse("Admin only"))
-                    call.respond(BinanceTestnetStatusResponse(configured = binanceTestnet.configured, usesArgentLedger = binanceTestnet.configured))
-                }
-                get("/api/v1/admin/binance-spot-testnet/price") {
-                    val p = call.requireArgentPrincipal()
-                    if (p.role != UserRole.ADMIN.name) return@get call.respond(HttpStatusCode.Forbidden, ErrorResponse("Admin only"))
-                    val symbol = call.request.queryParameters["symbol"] ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("symbol query parameter is required"))
-                    try { call.respond(binanceTestnet.tickerPrice(symbol)) }
-                    catch (failure: BinanceTestnetException) {
-                        val status = if (failure.upstreamStatus in 400..499) HttpStatusCode.BadRequest else HttpStatusCode.BadGateway
-                        call.respond(status, ErrorResponse(failure.message ?: "Could not load Testnet price"))
-                    }
-                }
-                post("/api/v1/admin/binance-spot-testnet/orders") {
-                    val p = call.requireArgentPrincipal()
-                    if (p.role != UserRole.ADMIN.name) return@post call.respond(HttpStatusCode.Forbidden, ErrorResponse("Admin only"))
-                    if (!binanceTestnet.configured) return@post call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse("Configure Binance Spot Testnet credentials locally first"))
-                    val body = call.receive<BinanceTestnetOrderRequest>()
-                    try {
-                        val result = binanceTestnetExecution.place(p.accountId, TestnetOrderRequest(
-                            symbol = body.symbol,
-                            side = body.side,
-                            type = body.type,
-                            quantity = body.quantity,
-                            price = body.price,
-                            timeInForce = body.timeInForce,
-                            clientOrderId = body.clientOrderId
-                        ))
-                        call.respond(result)
-                    } catch (failure: BinanceTestnetException) {
-                        val status = if (failure.upstreamStatus in 400..499) HttpStatusCode.BadRequest else HttpStatusCode.BadGateway
-                        val message = failure.message.orEmpty()
-                        val userMessage = if (message.contains("PERCENT_PRICE_BY_SIDE", ignoreCase = true)) {
-                            "Fiyat Binance Spot Testnet'in izin verdiği aralığın dışında; güncel Testnet fiyatını yenileyip tekrar deneyin. (PERCENT_PRICE_BY_SIDE)"
-                        } else message.ifBlank { "Binance Spot Testnet request failed" }
-                        call.respond(status, ErrorResponse(userMessage))
-                    }
-                }
-                get("/api/v1/admin/binance-spot-testnet/orders/{orderId}") {
-                    val p = call.requireArgentPrincipal()
-                    if (p.role != UserRole.ADMIN.name) return@get call.respond(HttpStatusCode.Forbidden, ErrorResponse("Admin only"))
-                    if (!binanceTestnet.configured) return@get call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse("Configure Binance Spot Testnet credentials locally first"))
-                    val symbol = call.request.queryParameters["symbol"] ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("symbol query parameter is required"))
-                    val orderId = call.parameters["orderId"]?.toLongOrNull() ?: return@get call.respond(HttpStatusCode.BadRequest, ErrorResponse("orderId must be numeric"))
-                    try { call.respond(binanceTestnetExecution.get(p.accountId, symbol, orderId)) }
-                    catch (failure: BinanceTestnetException) {
-                        val status = if (failure.upstreamStatus in 400..499) HttpStatusCode.BadRequest else HttpStatusCode.BadGateway
-                        call.respond(status, ErrorResponse(failure.message ?: "Binance Spot Testnet request failed"))
-                    }
-                }
-                delete("/api/v1/admin/binance-spot-testnet/orders/{orderId}") {
-                    val p = call.requireArgentPrincipal()
-                    if (p.role != UserRole.ADMIN.name) return@delete call.respond(HttpStatusCode.Forbidden, ErrorResponse("Admin only"))
-                    if (!binanceTestnet.configured) return@delete call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse("Configure Binance Spot Testnet credentials locally first"))
-                    val symbol = call.request.queryParameters["symbol"] ?: return@delete call.respond(HttpStatusCode.BadRequest, ErrorResponse("symbol query parameter is required"))
-                    val orderId = call.parameters["orderId"]?.toLongOrNull() ?: return@delete call.respond(HttpStatusCode.BadRequest, ErrorResponse("orderId must be numeric"))
-                    try { call.respond(binanceTestnetExecution.cancel(p.accountId, symbol, orderId)) }
-                    catch (failure: BinanceTestnetException) {
-                        val status = if (failure.upstreamStatus in 400..499) HttpStatusCode.BadRequest else HttpStatusCode.BadGateway
-                        call.respond(status, ErrorResponse(failure.message ?: "Binance Spot Testnet request failed"))
-                    }
-                }
-                post("/api/v1/admin/market-data/bist/replay") {
-                    val p = call.requireArgentPrincipal()
-                    if (p.role != UserRole.ADMIN.name) return@post call.respond(HttpStatusCode.Forbidden, ErrorResponse("Admin only"))
-                    val request = call.receive<BistHistoricalReplayRequest>()
-                    try {
-                        call.respond(HttpStatusCode.Accepted, market.startBistHistoricalReplay(request.csv, request.speed))
-                    } catch (failure: IllegalArgumentException) {
-                        call.respond(HttpStatusCode.BadRequest, ErrorResponse(failure.message ?: "Invalid BIST CSV"))
-                    } catch (failure: IllegalStateException) {
-                        call.respond(HttpStatusCode.Conflict, ErrorResponse(failure.message ?: "BIST replay unavailable"))
-                    }
-                }
-                get("/api/v1/admin/market-data/bist/replay") {
-                    val p = call.requireArgentPrincipal()
-                    if (p.role != UserRole.ADMIN.name) return@get call.respond(HttpStatusCode.Forbidden, ErrorResponse("Admin only"))
-                    call.respond(market.bistHistoricalReplayStatus() ?: mapOf("state" to "IDLE"))
-                }
-                get("/api/v1/admin/market-maker") {
-                    val p = call.requireArgentPrincipal()
-                    if (p.role != UserRole.ADMIN.name) return@get call.respond(HttpStatusCode.Forbidden, ErrorResponse("Admin only"))
-                    val mm = liquidityProvider
-                        ?: return@get call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse("Market maker is not configured"))
-                    call.respond(MarketMakerStatusResponse(
-                        enabled = mm.isEnabled,
-                        mode = "INTERNAL",
-                        quoteNotionalCap = mm.quoteNotionalLimit,
-                        inventoryNotionalCap = mm.inventoryNotionalLimit,
-                        staleQuoteTtlMs = mm.quoteAgeLimitMs
-                    ))
-                }
-                post("/api/v1/admin/market-maker/kill-switch") {
-                    val p = call.requireArgentPrincipal()
-                    if (p.role != UserRole.ADMIN.name) return@post call.respond(HttpStatusCode.Forbidden, ErrorResponse("Admin only"))
-                    val mm = liquidityProvider
-                        ?: return@post call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse("Market maker is not configured"))
-                    val cancelled = mm.killSwitch()
-                    call.respond(MarketMakerActionResponse(false, cancelled))
-                }
-                post("/api/v1/admin/market-maker/resume") {
-                    val p = call.requireArgentPrincipal()
-                    if (p.role != UserRole.ADMIN.name) return@post call.respond(HttpStatusCode.Forbidden, ErrorResponse("Admin only"))
-                    val mm = liquidityProvider
-                        ?: return@post call.respond(HttpStatusCode.ServiceUnavailable, ErrorResponse("Market maker is not configured"))
-                    mm.resume()
-                    call.respond(MarketMakerActionResponse(true))
-                }
-                post("/api/v1/admin/replay/{symbol}") {
-                    val p = call.requireArgentPrincipal()
-                    if (p.role != UserRole.ADMIN.name) {
-                        call.respond(HttpStatusCode.Forbidden, ErrorResponse("Admin only"))
-                        return@post
-                    }
-                    val symbol = call.parameters["symbol"]?.uppercase() ?: throw IllegalArgumentException("Symbol is required")
-                    val events = eventStore.load(symbol)
-                    val scratch = core.newMatchingEngine(eventSink = {}, keepRecordedEvents = false, rollbackOnMutationFailure = false)
-                    try {
-                        scratch.replay(events)
-                        val depth = scratch.depth(symbol)
-                        val resting = scratch.snapshot(symbol)
-                        call.respond(
-                            ReplayResponse(
-                                symbol = symbol,
-                                events = events.size,
-                                restingOrders = resting.size,
-                                bestBid = depth.bestBid,
-                                bestAsk = depth.bestAsk
-                            )
-                        )
-                    } finally {
-                        scratch.shutdown()
+                        val accountId = cred.payload.getClaim("accountId").asString()
+                        val tenantRole = cred.payload.getClaim("tenantRole").asString()
+                        if (user != null && access != null && tenantId != null && accountId == access.accountId && tenantRole == access.role.name) {
+                            ArgentPrincipal(user.id, user.role.name, tenantId, access.role, access.accountId)
+                        } else {
+                            null
+                        }
                     }
                 }
             }
 
-            registerMarketSockets(market, engine, broker, config.jwtSecret, auth, clientAddressResolver, limiter, orders, json)
-            webSocket("/ws/portfolio") {
-                val authHeader = call.request.header(HttpHeaders.Authorization)
-                val token = authHeader
-                    ?.takeIf { it.startsWith("Bearer ", ignoreCase = true) }
-                    ?.substringAfter(' ')
-                    ?.trim()
-                    ?.takeIf(String::isNotEmpty)
-                    ?: return@webSocket close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "Bearer token required"))
-                val decoded = runCatching { JWT.require(Algorithm.HMAC256(config.jwtSecret)).build().verify(token) }.getOrNull()
-                    ?: return@webSocket close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "invalid token"))
-                val userId = decoded.getClaim("userId").asString() ?: decoded.subject
-                if (auth.getUser(userId)?.active != true) {
-                    return@webSocket close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "account unavailable"))
-                }
-                val tenantId = decoded.getClaim("tenantId").asString()
-                val access = tenantId?.let { auth.tenantAccess(userId, it) }
-                val accountId = decoded.getClaim("accountId").asString()
-                if (access == null || accountId != access.accountId) {
-                    return@webSocket close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "tenant unavailable"))
-                }
-                if (accountId.isNullOrBlank()) {
-                    return@webSocket close(CloseReason(CloseReason.Codes.VIOLATED_POLICY, "account unavailable"))
-                }
-                while (true) {
-                    val snap = portfolioSnapshot(accountId, market.allLastPrices())
-                    send(Frame.Text(json.encodeToString(com.argent.common.domain.PortfolioSnapshot.serializer(), snap)))
-                    delay(1_000)
+            intercept(ApplicationCallPipeline.Plugins) {
+                val path = call.request.path()
+                val skip = path == "/" || path == "/health" || path == "/metrics"
+                if (skip) return@intercept
+                val remoteHost =
+                    clientAddressResolver.resolve(
+                        call.request.local.remoteHost,
+                        call.request.header("X-Forwarded-For"),
+                    )
+                val (bucket, requestLimit) =
+                    when (path) {
+                        "/api/v1/auth/login" -> "auth:login" to 10
+                        "/api/v1/auth/register" -> "auth:register" to 5
+                        "/api/v1/auth/google/nonce" -> "auth:google-nonce" to 10
+                        "/api/v1/auth/google" -> "auth:google" to 10
+                        "/api/v1/auth/register/invitation" -> "auth:invitation" to 10
+                        "/api/v1/auth/refresh" -> "auth:refresh" to 20
+                        "/api/v1/assistant/chat" -> "api:assistant" to 20
+                        else ->
+                            if (call.request.httpMethod == HttpMethod.Get) {
+                                // The desktop terminal polls several read endpoints every second. A single
+                                // IP-wide 120/minute bucket throttles normal UI use (and users behind NAT).
+                                // Keep reads bounded per route, while preserving a shared write limit below.
+                                "api:read:$path" to 300
+                            } else {
+                                "api:write" to 120
+                            }
+                    }
+                if (!limiter.allow("$bucket:$remoteHost", requestLimit)) {
+                    call.respond(HttpStatusCode.TooManyRequests, ErrorResponse("Rate limit exceeded"))
+                    finish()
                 }
             }
+
+            routing {
+                get("/") {
+                    call.respondText("ARGENT Multi-Asset Trading & Settlement Platform", ContentType.Text.Plain)
+                }
+                registerSystemRoutes(routeContext, prometheus)
+
+                marketReadRoutes(market, engine, orders, externalMarketData, candleStore, json)
+                publicAuthRoutes(
+                    config = config,
+                    auth = auth,
+                    googleIdentity = googleIdentity,
+                    seedPublicPaperBalance = { userId -> seedPublicPaperBalance(ledger, userId) },
+                    seedBalanceForTrader = { accessToken -> seedBalanceForPublicTrader(ledger, accessToken) },
+                )
+
+                registerAccountRoutes(routeContext)
+                registerInstrumentAdminRoutes(routeContext)
+                registerTradingAdminRoutes(routeContext)
+
+                registerMarketSockets(market, engine, broker, config.jwtSecret, auth, clientAddressResolver, limiter, orders, json)
+                registerPortfolioSocket(routeContext)
+            }
         }
-    }
-    Runtime.getRuntime().addShutdownHook(Thread {
-        log.info("Shutting down")
-        engine.shutdown()
-        market.stop()
-        broker.close()
-        limiter.close()
-        ds.close()
-    })
+    Runtime.getRuntime().addShutdownHook(
+        Thread {
+            log.info("Shutting down")
+            engine.shutdown()
+            market.stop()
+            broker.close()
+            limiter.close()
+            ds.close()
+        },
+    )
     server.start(wait = true)
 }

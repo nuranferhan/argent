@@ -12,7 +12,7 @@ Bu kılavuz yerel internal-exchange kurulumu içindir. Emirler, bakiyeler ve fiy
 6. PostgreSQL çalışırken `.\scripts\test-postgres-integration.ps1` çalıştırın. Test geçici bir schema oluşturur; eşzamanlı reservation işlemlerini ve yeni bir database connection üzerinden settlement replay'i sınar, ardından schema'yı siler.
 7. ARGENT'i Windows Start menüsünden açın. Login rate limit'e takılırsa yapılandırılmış sürenin dolmasını bekleyin veya Redis'ten yalnızca login rate-limit key'lerini temizleyin; Redis'i tamamen boşaltmayın ve database'i silmeyin.
 
-## Android sandbox client
+## Android sandbox istemcisi
 
 - Android Studio'yu Android SDK Platform 36, Build Tools 36.0.0 ve Platform Tools ile kurun; AGP için JDK 17 veya üzeri gerekir.
 - Yerel gateway çalışırken `scripts/package-android.ps1` debug APK'sini derler. `scripts/install-android.ps1`, APK'yi derler, yetkili USB cihazına/emulator'a bağlanır, `adb reverse` ile 8080 portunu yönlendirir ve APK'yi yükler.
@@ -24,7 +24,7 @@ Bu kılavuz yerel internal-exchange kurulumu içindir. Emirler, bakiyeler ve fiy
 
 Host gateway'i `start.ps1` çalıştıran pencerede Ctrl+C ile durdurun. App profile ile başlatılmış Compose servislerini `docker compose --profile app down`, temel stack ile başlatılanları `docker compose down` ile durdurun. Database volume'larını sildiği için `-v` eklemeyin.
 
-## Düzenli backup ve restore
+## Düzenli yedekleme ve geri yükleme
 
 - Backup oluşturmak için `.\scripts\backup-db.ps1` çalıştırın.
 - Gerçek bir disaster-recovery planı için oluşan dump'ı makine dışında saklayın. Yerel script tek başına off-host encryption, retention veya immutable storage sağlamaz.

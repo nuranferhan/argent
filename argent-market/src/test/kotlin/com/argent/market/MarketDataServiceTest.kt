@@ -1,17 +1,29 @@
 package com.argent.market
 
 import com.argent.common.domain.Instruments
+import com.argent.common.domain.AssetClass
+import com.argent.common.domain.Instrument
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
 import kotlinx.coroutines.ExperimentalCoroutinesApi
 import kotlinx.coroutines.test.runTest
 import kotlinx.coroutines.test.runCurrent
 import kotlinx.coroutines.test.advanceUntilIdle
+import kotlinx.coroutines.test.advanceTimeBy
 import io.kotest.assertions.throwables.shouldThrow
 import java.math.BigDecimal
 
 @OptIn(ExperimentalCoroutinesApi::class)
 class MarketDataServiceTest : FunSpec({
+    beforeTest {
+        Instruments.installCatalog(
+            listOf(
+                Instrument("BTCUSDT", "BTC", "USDT", AssetClass.CRYPTO, 8, 2, "0.01", "0.00000001", "Bitcoin"),
+                Instrument("THYAO", "THYAO", "TRY", AssetClass.EQUITY, 0, 2, "0.01", "1", "Turkish Airlines")
+            )
+        )
+    }
+
     test("keyless simulated feed publishes every supported instrument") {
         runTest {
             val service = MarketDataService(scope = backgroundScope, feedMode = MarketFeedMode.SIMULATED)
@@ -24,6 +36,25 @@ class MarketDataServiceTest : FunSpec({
                 ticker?.symbol shouldBe instrument.symbol
             }
             service.cryptoFeedStatus() shouldBe "SIMULATED"
+            service.stop()
+        }
+    }
+
+    test("new DB catalog instruments become quoted without restarting the simulator") {
+        runTest {
+            val service = MarketDataService(scope = backgroundScope, feedMode = MarketFeedMode.SIMULATED)
+            service.start()
+            runCurrent()
+
+            Instruments.installCatalog(Instruments.all + Instrument(
+                "NEWCOINUSDT", "NEWCOIN", "USDT", AssetClass.CRYPTO,
+                4, 3, "0.001", "0.0001", "New Coin", referencePrice = "0.5"
+            ))
+            advanceTimeBy(500)
+            runCurrent()
+
+            service.lastTicker("NEWCOINUSDT")?.source shouldBe "argent-sim"
+            service.lastTicker("NEWCOINUSDT")?.price?.toBigDecimal()?.signum() shouldBe 1
             service.stop()
         }
     }

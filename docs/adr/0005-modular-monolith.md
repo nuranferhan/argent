@@ -1,34 +1,21 @@
-# ADR 0005: Keep the application as a modular monolith
+# ADR 0005: Uygulamayı modüler monolith olarak sürdürme
 
-## Status
+## Durum
 
-Accepted
+Kabul edildi
 
-## Context
+## Bağlam
 
-ARGENT has separate Gradle modules for the gateway, matching engine, risk checks,
-ledger, and market data. These modules provide compile-time boundaries, but the
-local application runs them inside one gateway process. Deploying each module as
-a separate service would add network calls and distributed transaction failure
-modes to order acceptance and settlement without a current scaling requirement.
+ARGENT; gateway, matching engine, risk kontrolleri, ledger ve market data için ayrı Gradle modüllerine sahiptir. Bu modüller derleme zamanında sınırlar sağlar; ancak yerel uygulama bunları tek bir gateway process'i içinde çalıştırır. Her modülü ayrı servis olarak dağıtmak, mevcut bir ölçekleme gereksinimi olmadan emir kabulü ve settlement akışlarına ağ çağrıları ve dağıtık transaction kaynaklı hata durumları ekler.
 
-## Decision
+## Karar
 
-- Keep matching, risk, ledger, and market business logic as in-process modules.
-- Keep PostgreSQL as the durable source for account/order/event data and Redis
-  for shared rate limiting and short-lived state.
-- Keep RabbitMQ for asynchronous domain-event delivery and integrations; do not
-  put synchronous order validation or ledger writes behind the broker.
-- Use Docker Compose as the supported local runtime. Do not introduce a
-  Kubernetes/Minikube deployment until operational scale requires it.
-- Extract modules into separately deployed services only when measured load,
-  independent release needs, or fault isolation justify the extra network and
-  distributed consistency costs.
+- Matching, risk, ledger ve market iş mantığını aynı process içinde çalışan modüller olarak tut.
+- PostgreSQL'i hesap, emir ve olay verilerinin kalıcı kaynağı; Redis'i ortak rate limit ve kısa ömürlü durum için kullan.
+- RabbitMQ'yu asenkron domain event dağıtımı ve entegrasyonlar için kullan; senkron emir doğrulamasını veya ledger yazımlarını broker arkasına taşıma.
+- Yerel çalıştırma için desteklenen altyapı olarak Docker Compose'u kullan. Operasyonel ölçek gerektirmedikçe Kubernetes/Minikube dağıtımı ekleme.
+- Modülleri ancak ölçülen yük, bağımsız release gereksinimi veya hata yalıtımı; ek ağ ve dağıtık tutarlılık maliyetlerini haklı çıkardığında ayrı dağıtılan servislere ayır.
 
-## Consequences
+## Sonuçlar
 
-Order and settlement paths stay local to the gateway process, while module
-interfaces retain test and future extraction boundaries. PostgreSQL, Redis, and
-RabbitMQ remain infrastructure dependencies, so their health and recovery still
-need monitoring. This decision avoids service-per-module overhead; it does not
-claim that the infrastructure dependencies are optional in production.
+Emir ve settlement akışları gateway process'i içinde kalır; modül arayüzleri test ve ileride ayırma için sınırları korur. PostgreSQL, Redis ve RabbitMQ altyapı bağımlılıkları olmaya devam eder; bu nedenle sağlıkları ve kurtarma süreçleri izlenmelidir. Bu karar modül başına servis maliyetini önler; production ortamında altyapı bağımlılıklarının isteğe bağlı olduğu anlamına gelmez.

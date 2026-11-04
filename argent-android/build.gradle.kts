@@ -21,9 +21,10 @@ android {
         versionName = "1.0.3"
     }
 
-    sourceSets.getByName("main").java.srcDir("../argent-terminal/src/main/kotlin/com/argent/terminal/api")
-
     buildFeatures { compose = true }
+    packaging {
+        resources.excludes += "/META-INF/INDEX.LIST"
+    }
     buildTypes {
         debug { manifestPlaceholders["allowCleartextTraffic"] = "true" }
         release { manifestPlaceholders["allowCleartextTraffic"] = "false" }
@@ -42,6 +43,7 @@ kotlin {
 }
 
 dependencies {
+    implementation(project(":argent-client-core"))
     implementation(platform("androidx.compose:compose-bom:2024.12.01"))
     implementation("androidx.activity:activity-compose:1.9.3")
     implementation("androidx.credentials:credentials:1.6.0")

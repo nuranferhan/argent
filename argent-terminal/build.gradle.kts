@@ -13,6 +13,7 @@ kotlin {
 
 dependencies {
     implementation(project(":argent-common"))
+    implementation(project(":argent-client-core"))
     implementation(compose.desktop.currentOs)
     implementation(compose.material3)
     implementation("org.jetbrains.kotlinx:kotlinx-coroutines-core:1.9.0")

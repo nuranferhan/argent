@@ -19,7 +19,7 @@ enum class OrderStatus {
     FILLED,
     CANCELLED,
     REJECTED,
-    EXPIRED
+    EXPIRED,
 }
 
 @Serializable
@@ -37,12 +37,16 @@ data class Order(
     val status: OrderStatus = OrderStatus.PENDING,
     val createdAt: Long = Instant.now().toEpochMilli(),
     val updatedAt: Long = Instant.now().toEpochMilli(),
-    val sequence: Long = 0
+    val sequence: Long = 0,
 ) {
     fun priceBd(): BigDecimal = price?.let { BigDecimal(it) } ?: BigDecimal.ZERO
+
     fun quantityBd(): BigDecimal = BigDecimal(quantity)
+
     fun filledBd(): BigDecimal = BigDecimal(filledQuantity)
+
     fun remainingBd(): BigDecimal = BigDecimal(remainingQuantity)
+
     fun isActive(): Boolean = status == OrderStatus.ACCEPTED || status == OrderStatus.PARTIALLY_FILLED
 }
 
@@ -58,9 +62,11 @@ data class Trade(
     val sellUserId: String,
     val makerOrderId: String,
     val takerOrderId: String,
-    val executedAt: Long = Instant.now().toEpochMilli()
+    val executedAt: Long = Instant.now().toEpochMilli(),
 ) {
     fun priceBd(): BigDecimal = BigDecimal(price)
+
     fun quantityBd(): BigDecimal = BigDecimal(quantity)
+
     fun notional(): BigDecimal = priceBd().multiply(quantityBd())
 }

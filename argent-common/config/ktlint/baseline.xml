@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="src/main/kotlin/com/argent/common/domain/Instrument.kt">
+        <error line="22" column="39" source="standard:trailing-comma-on-declaration-site" />
+        <error line="47" column="1" source="standard:max-line-length" />
+        <error line="47" column="41" source="standard:wrapping" />
+        <error line="47" column="50" source="standard:argument-list-wrapping" />
+        <error line="47" column="88" source="standard:argument-list-wrapping" />
+        <error line="47" column="91" source="standard:wrapping" />
+        <error line="52" column="46" source="standard:function-signature" />
+        <error line="55" column="20" source="standard:function-signature" />
+        <error line="55" column="36" source="standard:function-signature" />
+        <error line="55" column="70" source="standard:function-signature" />
+        <error line="57" column="1" source="standard:max-line-length" />
+        <error line="57" column="66" source="standard:wrapping" />
+        <error line="57" column="80" source="standard:wrapping" />
+        <error line="60" column="25" source="standard:function-signature" />
+        <error line="60" column="41" source="standard:function-signature" />
+        <error line="60" column="75" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/argent/common/domain/Money.kt">
+        <error line="13" column="13" source="standard:function-signature" />
+        <error line="13" column="28" source="standard:function-signature" />
+        <error line="13" column="41" source="standard:function-signature" />
+        <error line="15" column="13" source="standard:function-signature" />
+        <error line="15" column="28" source="standard:function-signature" />
+        <error line="15" column="41" source="standard:function-signature" />
+        <error line="21" column="15" source="standard:function-signature" />
+        <error line="21" column="30" source="standard:function-signature" />
+        <error line="21" column="40" source="standard:function-signature" />
+        <error line="21" column="55" source="standard:function-signature" />
+        <error line="24" column="18" source="standard:function-signature" />
+        <error line="24" column="37" source="standard:function-signature" />
+        <error line="24" column="57" source="standard:function-signature" />
+    </file>
+    <file name="src/main/kotlin/com/argent/common/domain/Order.kt">
+        <error line="22" column="12" source="standard:trailing-comma-on-declaration-site" />
+        <error line="40" column="27" source="standard:trailing-comma-on-declaration-site" />
+        <error line="43" column="5" source="standard:blank-line-before-declaration" />
+        <error line="44" column="5" source="standard:blank-line-before-declaration" />
+        <error line="45" column="5" source="standard:blank-line-before-declaration" />
+        <error line="46" column="5" source="standard:blank-line-before-declaration" />
+        <error line="61" column="56" source="standard:trailing-comma-on-declaration-site" />
+        <error line="64" column="5" source="standard:blank-line-before-declaration" />
+        <error line="65" column="5" source="standard:blank-line-before-declaration" />
+    </file>
+    <file name="src/main/kotlin/com/argent/common/domain/Portfolio.kt">
+        <error line="12" column="26" source="standard:trailing-comma-on-declaration-site" />
+        <error line="15" column="5" source="standard:blank-line-before-declaration" />
+        <error line="16" column="5" source="standard:blank-line-before-declaration" />
+        <error line="25" column="34" source="standard:trailing-comma-on-declaration-site" />
+        <error line="28" column="5" source="standard:blank-line-before-declaration" />
+        <error line="29" column="5" source="standard:blank-line-before-declaration" />
+        <error line="47" column="52" source="standard:trailing-comma-on-declaration-site" />
+        <error line="57" column="25" source="standard:trailing-comma-on-declaration-site" />
+        <error line="68" column="29" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+    <file name="src/main/kotlin/com/argent/common/events/EventCodec.kt">
+        <error line="10" column="22" source="standard:multiline-expression-wrapping" />
+        <error line="14" column="29" source="standard:multiline-expression-wrapping" />
+    </file>
+    <file name="src/main/kotlin/com/argent/common/events/Events.kt">
+        <error line="25" column="21" source="standard:trailing-comma-on-declaration-site" />
+        <error line="35" column="21" source="standard:trailing-comma-on-declaration-site" />
+        <error line="46" column="23" source="standard:trailing-comma-on-declaration-site" />
+        <error line="57" column="42" source="standard:trailing-comma-on-declaration-site" />
+        <error line="67" column="21" source="standard:trailing-comma-on-declaration-site" />
+        <error line="79" column="23" source="standard:trailing-comma-on-declaration-site" />
+        <error line="91" column="23" source="standard:trailing-comma-on-declaration-site" />
+        <error line="101" column="24" source="standard:trailing-comma-on-declaration-site" />
+        <error line="114" column="32" source="standard:trailing-comma-on-declaration-site" />
+    </file>
+</baseline>

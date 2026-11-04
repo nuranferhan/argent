@@ -3,17 +3,20 @@ package com.argent.gateway.auth
 import com.auth0.jwt.JWT
 import com.zaxxer.hikari.HikariConfig
 import com.zaxxer.hikari.HikariDataSource
+import io.kotest.assertions.throwables.shouldThrow
 import io.kotest.core.spec.style.FunSpec
 import io.kotest.matchers.shouldBe
-import io.kotest.assertions.throwables.shouldThrow
 import org.jetbrains.exposed.sql.Database
 
 class TenantAuthTest : FunSpec({
     fun service(): AuthService {
-        val dataSource = HikariDataSource(HikariConfig().apply {
-            jdbcUrl = "jdbc:h2:mem:tenant_${System.nanoTime()};MODE=PostgreSQL;DB_CLOSE_DELAY=-1"
-            maximumPoolSize = 2
-        })
+        val dataSource =
+            HikariDataSource(
+                HikariConfig().apply {
+                    jdbcUrl = "jdbc:h2:mem:tenant_${System.nanoTime()};MODE=PostgreSQL;DB_CLOSE_DELAY=-1"
+                    maximumPoolSize = 2
+                },
+            )
         val auth = AuthService(Database.connect(dataSource), "tenant-test-secret-is-long-enough-123")
         auth.initSchema()
         return auth
@@ -91,8 +94,22 @@ class TenantAuthTest : FunSpec({
         auth.updateTenantRole(owner.tenantId, owner.id, invited.id, TenantRole.VIEWER)
         auth.tenantAccess(invited.id, owner.tenantId)!!.role shouldBe TenantRole.VIEWER
         shouldThrow<IllegalArgumentException> { auth.tenantMembers(owner.tenantId, invited.id) }
-        shouldThrow<IllegalArgumentException> { auth.updateTenantRole(owner.tenantId, invited.id, owner.id, TenantRole.TRADER) }
-        shouldThrow<IllegalArgumentException> { auth.updateTenantRole(owner.tenantId, owner.id, owner.id, TenantRole.TRADER) }
+        shouldThrow<IllegalArgumentException> {
+            auth.updateTenantRole(
+                owner.tenantId,
+                invited.id,
+                owner.id,
+                TenantRole.TRADER,
+            )
+        }
+        shouldThrow<IllegalArgumentException> {
+            auth.updateTenantRole(
+                owner.tenantId,
+                owner.id,
+                owner.id,
+                TenantRole.TRADER,
+            )
+        }
     }
 
     test("tenant admins cannot grant peer administrator access by invitation") {
@@ -105,7 +122,12 @@ class TenantAuthTest : FunSpec({
         shouldThrow<IllegalArgumentException> {
             auth.createInvitation(owner.tenantId, admin.id, "peer@example.com", TenantRole.ADMIN)
         }
-        auth.createInvitation(owner.tenantId, admin.id, "trader@example.com", TenantRole.TRADER).role shouldBe TenantRole.TRADER
+        auth.createInvitation(
+            owner.tenantId,
+            admin.id,
+            "trader@example.com",
+            TenantRole.TRADER,
+        ).role shouldBe TenantRole.TRADER
     }
 
     test("member revocation invalidates sessions and permits controlled workspace closure") {

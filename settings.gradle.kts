@@ -20,6 +20,7 @@ include(
     "argent-market",
     "argent-risk",
     "argent-gateway",
+    "argent-client-core",
     "argent-terminal",
     "argent-android"
 )

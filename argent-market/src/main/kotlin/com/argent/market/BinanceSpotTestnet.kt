@@ -2,20 +2,20 @@ package com.argent.market
 
 import io.ktor.client.HttpClient
 import io.ktor.client.engine.cio.CIO
+import io.ktor.client.plugins.HttpTimeout
 import io.ktor.client.request.delete
 import io.ktor.client.request.get
 import io.ktor.client.request.header
 import io.ktor.client.request.post
 import io.ktor.client.statement.bodyAsText
-import io.ktor.client.plugins.HttpTimeout
 import io.ktor.http.HttpStatusCode
+import kotlinx.coroutines.sync.Mutex
+import kotlinx.coroutines.sync.withLock
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.decodeFromString
 import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.jsonObject
 import kotlinx.serialization.json.jsonPrimitive
-import kotlinx.serialization.decodeFromString
-import kotlinx.coroutines.sync.Mutex
-import kotlinx.coroutines.sync.withLock
 import java.math.BigDecimal
 import javax.crypto.Mac
 import javax.crypto.spec.SecretKeySpec
@@ -24,29 +24,49 @@ import javax.crypto.spec.SecretKeySpec
 class BinanceSpotTestnet(
     private val apiKey: String?,
     private val secret: String?,
-    private val http: HttpClient = HttpClient(CIO) {
-        install(HttpTimeout) {
-            requestTimeoutMillis = 15_000
-            connectTimeoutMillis = 5_000
-            socketTimeoutMillis = 15_000
-        }
-    }
+    private val http: HttpClient =
+        HttpClient(CIO) {
+            install(HttpTimeout) {
+                requestTimeoutMillis = 15_000
+                connectTimeoutMillis = 5_000
+                socketTimeoutMillis = 15_000
+            }
+        },
 ) : AutoCloseable {
     private val json = Json { ignoreUnknownKeys = true }
     private val timeSyncMutex = Mutex()
+
     @Volatile private var serverTimeOffsetMillis: Long? = null
+
     @Volatile private var serverTimeSyncedAtNanos: Long = 0
     val configured: Boolean get() = !apiKey.isNullOrBlank() && !secret.isNullOrBlank()
 
     suspend fun tickerPrice(rawSymbol: String): BinanceTestnetTickerPrice {
         val symbol = safeSymbol(rawSymbol)
-        val response = try { http.get("$BASE_URL/api/v3/ticker/price?symbol=$symbol") }
-        catch (cancelled: kotlinx.coroutines.CancellationException) { throw cancelled }
-        catch (_: Exception) { throw BinanceTestnetException(502, "Could not load the Binance Spot Testnet reference price") }
+        val response =
+            try {
+                http.get("$BASE_URL/api/v3/ticker/price?symbol=$symbol")
+            } catch (
+                cancelled: kotlinx.coroutines.CancellationException,
+            ) {
+                throw cancelled
+            } catch (
+                _: Exception,
+            ) {
+                throw BinanceTestnetException(502, "Could not load the Binance Spot Testnet reference price")
+            }
         val body = response.bodyAsText()
         if (response.status != HttpStatusCode.OK) {
-            val message = runCatching { Json.parseToJsonElement(body).jsonObject["msg"]?.jsonPrimitive?.content }.getOrNull()
-            throw BinanceTestnetException(response.status.value, message ?: "Could not load the Binance Spot Testnet reference price")
+            val message =
+                runCatching {
+                    Json.parseToJsonElement(
+                        body,
+                    ).jsonObject["msg"]?.jsonPrimitive?.content
+                }.getOrNull()
+            throw BinanceTestnetException(
+                response.status.value,
+                message ?: "Could not load the Binance Spot Testnet reference price",
+            )
         }
         return runCatching { json.decodeFromString<BinanceTestnetTickerPrice>(body) }
             .getOrElse { throw BinanceTestnetException(502, "Invalid price response from Binance Spot Testnet") }
@@ -61,13 +81,14 @@ class BinanceSpotTestnet(
         val type = request.type.uppercase()
         require(type in setOf("LIMIT", "MARKET")) { "type must be LIMIT or MARKET" }
         val quantity = positiveDecimal(request.quantity, "quantity")
-        val params = linkedMapOf(
-            "symbol" to symbol,
-            "side" to side,
-            "type" to type,
-            "quantity" to quantity,
-            "newOrderRespType" to "FULL"
-        )
+        val params =
+            linkedMapOf(
+                "symbol" to symbol,
+                "side" to side,
+                "type" to type,
+                "quantity" to quantity,
+                "newOrderRespType" to "FULL",
+            )
         if (type == "LIMIT") {
             val price = positiveDecimal(request.price ?: error("price is required for LIMIT"), "price")
             val timeInForce = request.timeInForce.uppercase()
@@ -79,39 +100,73 @@ class BinanceSpotTestnet(
             require(request.timeInForce == "GTC") { "timeInForce is only supported for LIMIT" }
         }
         request.clientOrderId?.let {
-            require(it.length <= 36 && it.matches(Regex("[A-Za-z0-9._:-]+"))) { "clientOrderId must be 1-36 safe characters" }
+            require(
+                it.length <= 36 && it.matches(Regex("[A-Za-z0-9._:-]+")),
+            ) { "clientOrderId must be 1-36 safe characters" }
             params["newClientOrderId"] = it
         }
         return signed("POST", "/api/v3/order", params)
     }
 
-    suspend fun getOrder(symbol: String, orderId: Long): TestnetOrder {
+    suspend fun getOrder(
+        symbol: String,
+        orderId: Long,
+    ): TestnetOrder {
         requireConfigured()
         require(orderId > 0) { "orderId must be positive" }
-        return signed("GET", "/api/v3/order", linkedMapOf("symbol" to safeSymbol(symbol), "orderId" to orderId.toString()))
+        return signed(
+            "GET",
+            "/api/v3/order",
+            linkedMapOf("symbol" to safeSymbol(symbol), "orderId" to orderId.toString()),
+        )
     }
 
-    suspend fun getOrderByClientOrderId(symbol: String, clientOrderId: String): TestnetOrder {
+    suspend fun getOrderByClientOrderId(
+        symbol: String,
+        clientOrderId: String,
+    ): TestnetOrder {
         requireConfigured()
         require(clientOrderId.length in 1..36 && clientOrderId.matches(Regex("[A-Za-z0-9._:-]+"))) {
             "clientOrderId must be 1-36 safe characters"
         }
-        return signed("GET", "/api/v3/order", linkedMapOf("symbol" to safeSymbol(symbol), "origClientOrderId" to clientOrderId))
+        return signed(
+            "GET",
+            "/api/v3/order",
+            linkedMapOf("symbol" to safeSymbol(symbol), "origClientOrderId" to clientOrderId),
+        )
     }
 
-    suspend fun trades(symbol: String, orderId: Long): List<BinanceTestnetTrade> {
+    suspend fun trades(
+        symbol: String,
+        orderId: Long,
+    ): List<BinanceTestnetTrade> {
         requireConfigured()
         require(orderId > 0) { "orderId must be positive" }
-        return signed("GET", "/api/v3/myTrades", linkedMapOf("symbol" to safeSymbol(symbol), "orderId" to orderId.toString()))
+        return signed(
+            "GET",
+            "/api/v3/myTrades",
+            linkedMapOf("symbol" to safeSymbol(symbol), "orderId" to orderId.toString()),
+        )
     }
 
-    suspend fun cancelOrder(symbol: String, orderId: Long): TestnetOrder {
+    suspend fun cancelOrder(
+        symbol: String,
+        orderId: Long,
+    ): TestnetOrder {
         requireConfigured()
         require(orderId > 0) { "orderId must be positive" }
-        return signed("DELETE", "/api/v3/order", linkedMapOf("symbol" to safeSymbol(symbol), "orderId" to orderId.toString()))
+        return signed(
+            "DELETE",
+            "/api/v3/order",
+            linkedMapOf("symbol" to safeSymbol(symbol), "orderId" to orderId.toString()),
+        )
     }
 
-    private suspend inline fun <reified T> signed(method: String, path: String, params: LinkedHashMap<String, String>): T {
+    private suspend inline fun <reified T> signed(
+        method: String,
+        path: String,
+        params: LinkedHashMap<String, String>,
+    ): T {
         val key = apiKey?.takeIf(String::isNotBlank) ?: error("Binance Spot Testnet API key is not configured")
         val signingSecret = secret?.takeIf(String::isNotBlank) ?: error("Binance Spot Testnet secret is not configured")
         params["recvWindow"] = "5000"
@@ -119,21 +174,27 @@ class BinanceSpotTestnet(
         val query = params.entries.joinToString("&") { (key, value) -> "$key=$value" }
         val signature = hmacSha256(signingSecret, query)
         val url = "$BASE_URL$path?$query&signature=$signature"
-        val response = try {
-            when (method) {
-                "POST" -> http.post(url) { header("X-MBX-APIKEY", key) }
-                "DELETE" -> http.delete(url) { header("X-MBX-APIKEY", key) }
-                else -> http.get(url) { header("X-MBX-APIKEY", key) }
+        val response =
+            try {
+                when (method) {
+                    "POST" -> http.post(url) { header("X-MBX-APIKEY", key) }
+                    "DELETE" -> http.delete(url) { header("X-MBX-APIKEY", key) }
+                    else -> http.get(url) { header("X-MBX-APIKEY", key) }
+                }
+            } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                throw cancelled
+            } catch (_: Exception) {
+                // Do not leak signed request URLs in application logs or error responses.
+                throw BinanceTestnetException(502, "Binance Spot Testnet is unavailable")
             }
-        } catch (cancelled: kotlinx.coroutines.CancellationException) {
-            throw cancelled
-        } catch (_: Exception) {
-            // Do not leak signed request URLs in application logs or error responses.
-            throw BinanceTestnetException(502, "Binance Spot Testnet is unavailable")
-        }
         val body = response.bodyAsText()
         if (response.status != HttpStatusCode.OK && response.status != HttpStatusCode.Created) {
-            val message = runCatching { Json.parseToJsonElement(body).jsonObject["msg"]?.jsonPrimitive?.content }.getOrNull()
+            val message =
+                runCatching {
+                    Json.parseToJsonElement(
+                        body,
+                    ).jsonObject["msg"]?.jsonPrimitive?.content
+                }.getOrNull()
             throw BinanceTestnetException(response.status.value, message ?: "Binance Spot Testnet request failed")
         }
         return runCatching { json.decodeFromString<T>(body) }
@@ -153,21 +214,23 @@ class BinanceSpotTestnet(
                 return@withLock System.currentTimeMillis() + offset
             }
             val startedAt = System.currentTimeMillis()
-            val response = try {
-                http.get("$BASE_URL/api/v3/time")
-            } catch (cancelled: kotlinx.coroutines.CancellationException) {
-                throw cancelled
-            } catch (_: Exception) {
-                throw BinanceTestnetException(502, "Could not synchronize with Binance Spot Testnet time")
-            }
+            val response =
+                try {
+                    http.get("$BASE_URL/api/v3/time")
+                } catch (cancelled: kotlinx.coroutines.CancellationException) {
+                    throw cancelled
+                } catch (_: Exception) {
+                    throw BinanceTestnetException(502, "Could not synchronize with Binance Spot Testnet time")
+                }
             if (response.status != HttpStatusCode.OK) {
                 throw BinanceTestnetException(502, "Could not synchronize with Binance Spot Testnet time")
             }
-            val serverTime = runCatching {
-                json.decodeFromString<BinanceServerTime>(response.bodyAsText()).serverTime
-            }.getOrElse {
-                throw BinanceTestnetException(502, "Invalid time response from Binance Spot Testnet")
-            }
+            val serverTime =
+                runCatching {
+                    json.decodeFromString<BinanceServerTime>(response.bodyAsText()).serverTime
+                }.getOrElse {
+                    throw BinanceTestnetException(502, "Invalid time response from Binance Spot Testnet")
+                }
             val receivedAt = System.currentTimeMillis()
             val midpoint = startedAt + (receivedAt - startedAt) / 2
             val synchronizedOffsetMillis = serverTime - midpoint
@@ -181,9 +244,10 @@ class BinanceSpotTestnet(
         check(configured) { "Binance Spot Testnet credentials are not configured" }
     }
 
-    private fun safeSymbol(symbol: String): String = symbol.uppercase().also {
-        require(it.matches(Regex("[A-Z0-9]{5,20}"))) { "Invalid Binance symbol" }
-    }
+    private fun safeSymbol(symbol: String): String =
+        symbol.uppercase().also {
+            require(it.matches(Regex("[A-Z0-9]{5,20}"))) { "Invalid Binance symbol" }
+        }
 
     override fun close() = http.close()
 
@@ -191,13 +255,21 @@ class BinanceSpotTestnet(
         private const val BASE_URL = "https://testnet.binance.vision"
         private const val TIME_OFFSET_TTL_NANOS = 30_000_000_000L
 
-        private fun positiveDecimal(value: String, name: String): String {
+        private fun positiveDecimal(
+            value: String,
+            name: String,
+        ): String {
             val parsed = value.toBigDecimalOrNull() ?: throw IllegalArgumentException("$name must be a decimal number")
-            require(parsed > BigDecimal.ZERO && parsed.scale() <= 16) { "$name must be positive with at most 16 decimal places" }
+            require(
+                parsed > BigDecimal.ZERO && parsed.scale() <= 16,
+            ) { "$name must be positive with at most 16 decimal places" }
             return parsed.stripTrailingZeros().toPlainString()
         }
 
-        private fun hmacSha256(secret: String, value: String): String {
+        private fun hmacSha256(
+            secret: String,
+            value: String,
+        ): String {
             val mac = Mac.getInstance("HmacSHA256")
             mac.init(SecretKeySpec(secret.toByteArray(Charsets.UTF_8), "HmacSHA256"))
             return mac.doFinal(value.toByteArray(Charsets.UTF_8)).joinToString("") { "%02x".format(it) }
@@ -218,7 +290,7 @@ data class TestnetOrderRequest(
     val quantity: String,
     val price: String? = null,
     val timeInForce: String = "GTC",
-    val clientOrderId: String? = null
+    val clientOrderId: String? = null,
 )
 
 @Serializable
@@ -236,7 +308,7 @@ data class TestnetOrder(
     val transactTime: Long? = null,
     val cummulativeQuoteQty: String? = null,
     val fills: List<BinanceTestnetFill> = emptyList(),
-    val ledgerSynced: Boolean = false
+    val ledgerSynced: Boolean = false,
 )
 
 @Serializable
@@ -245,7 +317,7 @@ data class BinanceTestnetFill(
     val qty: String,
     val commission: String,
     val commissionAsset: String,
-    val tradeId: Long? = null
+    val tradeId: Long? = null,
 )
 
 @Serializable
@@ -258,7 +330,7 @@ data class BinanceTestnetTrade(
     val commission: String,
     val commissionAsset: String,
     val isBuyer: Boolean,
-    val time: Long
+    val time: Long,
 )
 
 class BinanceTestnetException(val upstreamStatus: Int, message: String) : RuntimeException(message)

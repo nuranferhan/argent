@@ -1,4 +1,4 @@
-# ARGENT Matching Core
+# ARGENT Eşleştirme Çekirdeği
 
 ARGENT matching engine ve double-entry ledger üzerine kurulmuş yeniden kullanılabilir library facade.
 

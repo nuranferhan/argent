@@ -1,8 +1,8 @@
-# ARGENT production readiness
+# ARGENT üretime hazırlık
 
 Hedeflenen ürün; çok kiracılı, production kalitesinde bir internal exchange ve settlement platformudur. Emirleri ARGENT'in kendi order book'ları ve sentetik sandbox likiditesi üzerinden yürütür; harici execution venue, lisanslı piyasa verisi veya custody sağlayıcısı yoktur. Yerel health yanıtının yeşil olması, yapılandırılmış servislerin erişilebilir olduğunu doğrular; sentetik fiyatlar ve dahili bakiyeler gerçek piyasa verisi veya müşteri fonu değildir.
 
-## Bu repository'de uygulananlar
+## Bu depoda uygulananlar
 
 - Kotlin multi-module gateway, matching engine, ledger, risk/portfolio mantığı ve market data feed'i; ayrıca aynı gateway API'sini kullanan Compose Desktop ve Jetpack Compose Android client'ları.
 - Gateway tek deploy edilebilir uygulamadır; engine, risk, ledger ve market bileşenleri ayrı ağ servisleri değil, aynı process içinde kullanılan Gradle modülleridir. PostgreSQL, Redis ve RabbitMQ yalnızca kalıcılık, önbellek ve event taşıma için runtime sınırıdır. Böylece her iş kuralı için ayrı servis/hop yaratılmaz.

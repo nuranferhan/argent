@@ -1,8 +1,11 @@
 package com.argent.gateway.trading
 
-import com.argent.engine.MatchingEngine
+import com.argent.common.domain.AssetClass
+import com.argent.common.domain.Instrument
+import com.argent.common.domain.Instruments
 import com.argent.common.domain.Trade
 import com.argent.common.events.TradeExecuted
+import com.argent.engine.MatchingEngine
 import com.argent.gateway.api.PlaceOrderRequest
 import com.argent.gateway.order.OrderRepository
 import com.argent.ledger.LedgerService
@@ -18,13 +21,17 @@ import java.math.BigDecimal
 class TradingServiceTest : FunSpec({
 
     fun harness(): Triple<TradingService, LedgerService, MatchingEngine> {
-        val ds = HikariDataSource(
-            HikariConfig().apply {
-                jdbcUrl = "jdbc:h2:mem:trade_${System.nanoTime()};MODE=PostgreSQL;DB_CLOSE_DELAY=-1"
-                maximumPoolSize = 8
-                isAutoCommit = false
-            }
+        Instruments.installCatalog(
+            listOf(Instrument("THYAO", "THYAO", "TRY", AssetClass.EQUITY, 0, 2, "0.01", "1", "Turkish Airlines")),
         )
+        val ds =
+            HikariDataSource(
+                HikariConfig().apply {
+                    jdbcUrl = "jdbc:h2:mem:trade_${System.nanoTime()};MODE=PostgreSQL;DB_CLOSE_DELAY=-1"
+                    maximumPoolSize = 8
+                    isAutoCommit = false
+                },
+            )
         val db = Database.connect(ds)
         val ledger = LedgerService(ds).also { it.initSchema() }
         val orders = OrderRepository(db).also { it.initSchema() }
@@ -38,15 +45,17 @@ class TradingServiceTest : FunSpec({
         val (trading, ledger, engine) = harness()
         ledger.deposit("buyer", "TRY", BigDecimal("100000"), "db")
         ledger.deposit("seller", "THYAO", BigDecimal("100"), "ds")
-        val sell = trading.placeOrder(
-            "seller",
-            PlaceOrderRequest("THYAO", "SELL", "LIMIT", "310", "10", "s1")
-        )
+        val sell =
+            trading.placeOrder(
+                "seller",
+                PlaceOrderRequest("THYAO", "SELL", "LIMIT", "310", "10", "s1"),
+            )
         sell.accepted shouldBe true
-        val buy = trading.placeOrder(
-            "buyer",
-            PlaceOrderRequest("THYAO", "BUY", "LIMIT", "310", "10", "b1")
-        )
+        val buy =
+            trading.placeOrder(
+                "buyer",
+                PlaceOrderRequest("THYAO", "BUY", "LIMIT", "310", "10", "b1"),
+            )
         buy.accepted shouldBe true
         buy.status shouldBe "FILLED"
         buy.trades.size shouldBe 1
@@ -68,10 +77,11 @@ class TradingServiceTest : FunSpec({
 
     test("insufficient funds is rejected before the book") {
         val (trading, _, engine) = harness()
-        val result = trading.placeOrder(
-            "empty",
-            PlaceOrderRequest("THYAO", "BUY", "LIMIT", "310", "1", "x")
-        )
+        val result =
+            trading.placeOrder(
+                "empty",
+                PlaceOrderRequest("THYAO", "BUY", "LIMIT", "310", "1", "x"),
+            )
         result.accepted shouldBe false
         result.status shouldBe "REJECTED"
         engine.shutdown()
@@ -79,18 +89,19 @@ class TradingServiceTest : FunSpec({
 
     test("recovery skips a legacy trade whose order hold was already removed") {
         val (trading, _, engine) = harness()
-        val orphan = Trade(
-            id = "orphan-trade",
-            symbol = "THYAO",
-            price = "310",
-            quantity = "1",
-            buyOrderId = "missing-buy-hold",
-            sellOrderId = "missing-sell-hold",
-            buyUserId = "legacy-buyer",
-            sellUserId = "legacy-seller",
-            makerOrderId = "missing-sell-hold",
-            takerOrderId = "missing-buy-hold"
-        )
+        val orphan =
+            Trade(
+                id = "orphan-trade",
+                symbol = "THYAO",
+                price = "310",
+                quantity = "1",
+                buyOrderId = "missing-buy-hold",
+                sellOrderId = "missing-sell-hold",
+                buyUserId = "legacy-buyer",
+                sellUserId = "legacy-seller",
+                makerOrderId = "missing-sell-hold",
+                takerOrderId = "missing-buy-hold",
+            )
 
         trading.recoverUnsettled(listOf(TradeExecuted(aggregateId = "THYAO", trade = orphan)))
 

@@ -6,6 +6,7 @@ plugins {
     id("com.android.application") version "8.10.1" apply false
     id("org.jetbrains.kotlin.android") version "2.4.21" apply false
     id("me.champeau.jmh") version "0.7.3" apply false
+    id("org.jlleitschuh.gradle.ktlint") version "12.1.2" apply false
     id("jacoco")
 }
 
@@ -21,6 +22,12 @@ allprojects {
 }
 
 subprojects {
+    if (name.startsWith("argent-")) {
+        apply(plugin = "org.jlleitschuh.gradle.ktlint")
+        extensions.configure<org.jlleitschuh.gradle.ktlint.KtlintExtension> {
+            baseline = file("config/ktlint/baseline.xml")
+        }
+    }
     if (name == "argent-terminal" || name == "argent-android") return@subprojects
 
     apply(plugin = "jacoco")

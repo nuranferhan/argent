@@ -13,24 +13,26 @@ class OrderBookTest : FunSpec({
 
     test("simple limit match – buy takes sell at maker price") {
         val book = OrderBook("BTCUSDT")
-        val sell = Order(
-            userId = "seller",
-            symbol = "BTCUSDT",
-            side = OrderSide.SELL,
-            type = OrderType.LIMIT,
-            price = "100000",
-            quantity = "0.5"
-        )
+        val sell =
+            Order(
+                userId = "seller",
+                symbol = "BTCUSDT",
+                side = OrderSide.SELL,
+                type = OrderType.LIMIT,
+                price = "100000",
+                quantity = "0.5",
+            )
         book.match(sell)
 
-        val buy = Order(
-            userId = "buyer",
-            symbol = "BTCUSDT",
-            side = OrderSide.BUY,
-            type = OrderType.LIMIT,
-            price = "100000",
-            quantity = "0.3"
-        )
+        val buy =
+            Order(
+                userId = "buyer",
+                symbol = "BTCUSDT",
+                side = OrderSide.BUY,
+                type = OrderType.LIMIT,
+                price = "100000",
+                quantity = "0.3",
+            )
         val result = book.match(buy)
 
         result.trades.size shouldBe 1
@@ -42,12 +44,38 @@ class OrderBookTest : FunSpec({
 
     test("price-time priority – earlier order fills first") {
         val book = OrderBook("THYAO")
-        book.match(Order(userId = "s1", symbol = "THYAO", side = OrderSide.SELL, type = OrderType.LIMIT, price = "300", quantity = "100"))
-        book.match(Order(userId = "s2", symbol = "THYAO", side = OrderSide.SELL, type = OrderType.LIMIT, price = "300", quantity = "50"))
-
-        val result = book.match(
-            Order(userId = "b1", symbol = "THYAO", side = OrderSide.BUY, type = OrderType.LIMIT, price = "300", quantity = "120")
+        book.match(
+            Order(
+                userId = "s1",
+                symbol = "THYAO",
+                side = OrderSide.SELL,
+                type = OrderType.LIMIT,
+                price = "300",
+                quantity = "100",
+            ),
         )
+        book.match(
+            Order(
+                userId = "s2",
+                symbol = "THYAO",
+                side = OrderSide.SELL,
+                type = OrderType.LIMIT,
+                price = "300",
+                quantity = "50",
+            ),
+        )
+
+        val result =
+            book.match(
+                Order(
+                    userId = "b1",
+                    symbol = "THYAO",
+                    side = OrderSide.BUY,
+                    type = OrderType.LIMIT,
+                    price = "300",
+                    quantity = "120",
+                ),
+            )
 
         result.trades.size shouldBe 2
         result.trades[0].sellUserId shouldBe "s1"
@@ -58,9 +86,17 @@ class OrderBookTest : FunSpec({
 
     test("no cross – order rests") {
         val book = OrderBook("BTCUSDT")
-        val result = book.match(
-            Order(userId = "b", symbol = "BTCUSDT", side = OrderSide.BUY, type = OrderType.LIMIT, price = "99000", quantity = "1")
-        )
+        val result =
+            book.match(
+                Order(
+                    userId = "b",
+                    symbol = "BTCUSDT",
+                    side = OrderSide.BUY,
+                    type = OrderType.LIMIT,
+                    price = "99000",
+                    quantity = "1",
+                ),
+            )
         result.trades shouldBe emptyList()
         book.bestBid() shouldBe BigDecimal("99000")
         book.bestAsk() shouldBe null
@@ -68,7 +104,15 @@ class OrderBookTest : FunSpec({
 
     test("cancel removes order") {
         val book = OrderBook("ETHUSDT")
-        val order = Order(userId = "u", symbol = "ETHUSDT", side = OrderSide.BUY, type = OrderType.LIMIT, price = "3000", quantity = "2")
+        val order =
+            Order(
+                userId = "u",
+                symbol = "ETHUSDT",
+                side = OrderSide.BUY,
+                type = OrderType.LIMIT,
+                price = "3000",
+                quantity = "2",
+            )
         book.match(order)
         book.bestBid() shouldNotBe null
         val cancelled = book.cancel(order.id)
@@ -79,11 +123,36 @@ class OrderBookTest : FunSpec({
 
     test("market buy walks multiple ask levels") {
         val book = OrderBook("BTCUSDT")
-        book.match(Order(userId = "s1", symbol = "BTCUSDT", side = OrderSide.SELL, type = OrderType.LIMIT, price = "100", quantity = "1"))
-        book.match(Order(userId = "s2", symbol = "BTCUSDT", side = OrderSide.SELL, type = OrderType.LIMIT, price = "101", quantity = "1"))
-        val result = book.match(
-            Order(userId = "b", symbol = "BTCUSDT", side = OrderSide.BUY, type = OrderType.MARKET, quantity = "1.5")
+        book.match(
+            Order(
+                userId = "s1",
+                symbol = "BTCUSDT",
+                side = OrderSide.SELL,
+                type = OrderType.LIMIT,
+                price = "100",
+                quantity = "1",
+            ),
         )
+        book.match(
+            Order(
+                userId = "s2",
+                symbol = "BTCUSDT",
+                side = OrderSide.SELL,
+                type = OrderType.LIMIT,
+                price = "101",
+                quantity = "1",
+            ),
+        )
+        val result =
+            book.match(
+                Order(
+                    userId = "b",
+                    symbol = "BTCUSDT",
+                    side = OrderSide.BUY,
+                    type = OrderType.MARKET,
+                    quantity = "1.5",
+                ),
+            )
         result.trades.size shouldBe 2
         result.order.status shouldBe OrderStatus.FILLED
         result.trades[0].price shouldBe "100"
@@ -93,10 +162,27 @@ class OrderBookTest : FunSpec({
 
     test("FOK rejects when not fully fillable and does not take liquidity") {
         val book = OrderBook("THYAO")
-        book.match(Order(userId = "s", symbol = "THYAO", side = OrderSide.SELL, type = OrderType.LIMIT, price = "10", quantity = "5"))
-        val result = book.match(
-            Order(userId = "b", symbol = "THYAO", side = OrderSide.BUY, type = OrderType.FOK, price = "10", quantity = "10")
+        book.match(
+            Order(
+                userId = "s",
+                symbol = "THYAO",
+                side = OrderSide.SELL,
+                type = OrderType.LIMIT,
+                price = "10",
+                quantity = "5",
+            ),
         )
+        val result =
+            book.match(
+                Order(
+                    userId = "b",
+                    symbol = "THYAO",
+                    side = OrderSide.BUY,
+                    type = OrderType.FOK,
+                    price = "10",
+                    quantity = "10",
+                ),
+            )
         result.trades shouldBe emptyList()
         result.order.status shouldBe OrderStatus.CANCELLED
         book.depth().asks[0].quantity shouldBe "5"
@@ -104,10 +190,27 @@ class OrderBookTest : FunSpec({
 
     test("IOC fills partial and does not rest") {
         val book = OrderBook("THYAO")
-        book.match(Order(userId = "s", symbol = "THYAO", side = OrderSide.SELL, type = OrderType.LIMIT, price = "10", quantity = "4"))
-        val result = book.match(
-            Order(userId = "b", symbol = "THYAO", side = OrderSide.BUY, type = OrderType.IOC, price = "10", quantity = "10")
+        book.match(
+            Order(
+                userId = "s",
+                symbol = "THYAO",
+                side = OrderSide.SELL,
+                type = OrderType.LIMIT,
+                price = "10",
+                quantity = "4",
+            ),
         )
+        val result =
+            book.match(
+                Order(
+                    userId = "b",
+                    symbol = "THYAO",
+                    side = OrderSide.BUY,
+                    type = OrderType.IOC,
+                    price = "10",
+                    quantity = "10",
+                ),
+            )
         result.trades.size shouldBe 1
         result.order.status shouldBe OrderStatus.CANCELLED
         result.order.filledQuantity shouldBe "4"
@@ -117,10 +220,27 @@ class OrderBookTest : FunSpec({
 
     test("self-trade is prevented") {
         val book = OrderBook("GARAN")
-        book.match(Order(userId = "me", symbol = "GARAN", side = OrderSide.SELL, type = OrderType.LIMIT, price = "100", quantity = "10"))
-        val result = book.match(
-            Order(userId = "me", symbol = "GARAN", side = OrderSide.BUY, type = OrderType.LIMIT, price = "100", quantity = "10")
+        book.match(
+            Order(
+                userId = "me",
+                symbol = "GARAN",
+                side = OrderSide.SELL,
+                type = OrderType.LIMIT,
+                price = "100",
+                quantity = "10",
+            ),
         )
+        val result =
+            book.match(
+                Order(
+                    userId = "me",
+                    symbol = "GARAN",
+                    side = OrderSide.BUY,
+                    type = OrderType.LIMIT,
+                    price = "100",
+                    quantity = "10",
+                ),
+            )
         result.trades shouldBe emptyList()
         book.bestAsk() shouldBe BigDecimal("100")
         book.bestBid() shouldBe null
@@ -128,12 +248,158 @@ class OrderBookTest : FunSpec({
 
     test("self-trade guard allows a fully fillable earlier foreign order before own liquidity") {
         val book = OrderBook("GARAN")
-        book.match(Order(userId = "other", symbol = "GARAN", side = OrderSide.SELL, type = OrderType.LIMIT, price = "100", quantity = "1"))
-        val own = book.match(Order(userId = "me", symbol = "GARAN", side = OrderSide.SELL, type = OrderType.LIMIT, price = "100", quantity = "1"))
-        val result = book.match(Order(userId = "me", symbol = "GARAN", side = OrderSide.BUY, type = OrderType.LIMIT, price = "100", quantity = "1"))
+        book.match(
+            Order(
+                userId = "other",
+                symbol = "GARAN",
+                side = OrderSide.SELL,
+                type = OrderType.LIMIT,
+                price = "100",
+                quantity = "1",
+            ),
+        )
+        val own =
+            book.match(
+                Order(
+                    userId = "me",
+                    symbol = "GARAN",
+                    side = OrderSide.SELL,
+                    type = OrderType.LIMIT,
+                    price = "100",
+                    quantity = "1",
+                ),
+            )
+        val result =
+            book.match(
+                Order(
+                    userId = "me",
+                    symbol = "GARAN",
+                    side = OrderSide.BUY,
+                    type = OrderType.LIMIT,
+                    price = "100",
+                    quantity = "1",
+                ),
+            )
         result.trades.size shouldBe 1
         result.trades.single().sellUserId shouldBe "other"
         own.order.status shouldBe OrderStatus.ACCEPTED
         book.snapshotOrders().single().userId shouldBe "me"
+    }
+
+    test("undo journal restores a partially consumed maker order") {
+        val book = OrderBook("BTCUSDT")
+        val maker =
+            Order(
+                userId = "seller",
+                symbol = "BTCUSDT",
+                side = OrderSide.SELL,
+                type = OrderType.LIMIT,
+                price = "100",
+                quantity = "5",
+            )
+        book.match(maker)
+        val undo = mutableListOf<() -> Unit>()
+
+        book.match(
+            Order(
+                userId = "buyer",
+                symbol = "BTCUSDT",
+                side = OrderSide.BUY,
+                type = OrderType.LIMIT,
+                price = "100",
+                quantity = "2",
+            ),
+            undo,
+        )
+        book.rollback(undo)
+
+        book.snapshotOrders().single().id shouldBe maker.id
+        book.snapshotOrders().single().remainingQuantity shouldBe "5"
+        book.bestAsk() shouldBe BigDecimal("100")
+    }
+
+    test("undo journal restores a removed maker and its price level") {
+        val book = OrderBook("BTCUSDT")
+        val maker =
+            Order(
+                userId = "seller",
+                symbol = "BTCUSDT",
+                side = OrderSide.SELL,
+                type = OrderType.LIMIT,
+                price = "100",
+                quantity = "1",
+            )
+        book.match(maker)
+        val undo = mutableListOf<() -> Unit>()
+
+        book.match(
+            Order(
+                userId = "buyer",
+                symbol = "BTCUSDT",
+                side = OrderSide.BUY,
+                type = OrderType.LIMIT,
+                price = "100",
+                quantity = "1",
+            ),
+            undo,
+        )
+        book.rollback(undo)
+
+        book.snapshotOrders().single().id shouldBe maker.id
+        book.bestAsk() shouldBe BigDecimal("100")
+    }
+
+    test("depth, midpoint and bounded liquidity reflect executable resting orders") {
+        val book = OrderBook("BTCUSDT")
+        book.match(
+            Order(
+                userId = "s1",
+                symbol = "BTCUSDT",
+                side = OrderSide.SELL,
+                type = OrderType.LIMIT,
+                price = "101",
+                quantity = "2",
+            ),
+        )
+        book.match(
+            Order(
+                userId = "s2",
+                symbol = "BTCUSDT",
+                side = OrderSide.SELL,
+                type = OrderType.LIMIT,
+                price = "102",
+                quantity = "3",
+            ),
+        )
+        book.match(
+            Order(
+                userId = "b1",
+                symbol = "BTCUSDT",
+                side = OrderSide.BUY,
+                type = OrderType.LIMIT,
+                price = "99",
+                quantity = "4",
+            ),
+        )
+        book.match(
+            Order(
+                userId = "b2",
+                symbol = "BTCUSDT",
+                side = OrderSide.BUY,
+                type = OrderType.LIMIT,
+                price = "98",
+                quantity = "5",
+            ),
+        )
+
+        book.bestBid() shouldBe BigDecimal("99")
+        book.bestAsk() shouldBe BigDecimal("101")
+        book.midPrice() shouldBe BigDecimal("100")
+        book.depth(1).bids.single().quantity shouldBe "4"
+        book.depth(1).asks.single().quantity shouldBe "2"
+        book.availableLiquidity(OrderSide.BUY, BigDecimal("102")) shouldBe BigDecimal("5")
+        book.availableLiquidity(OrderSide.BUY, BigDecimal("102"), "s1") shouldBe BigDecimal("3")
+        book.availableLiquidity(OrderSide.SELL, BigDecimal("99")) shouldBe BigDecimal("4")
+        book.availableLiquidity(OrderSide.SELL, BigDecimal("98")) shouldBe BigDecimal("9")
     }
 })

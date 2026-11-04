@@ -1,0 +1,151 @@
+{
+    "root_group": {
+        "name": "",
+        "path": "",
+        "id": "d41d8cd98f00b204e9800998ecf8427e",
+        "groups": {},
+        "checks": {
+                "ticker responds HTTP 200": {
+                    "id": "aca36154f9ad111c587134515a0ab823",
+                    "passes": 1801,
+                    "fails": 0,
+                    "name": "ticker responds HTTP 200",
+                    "path": "::ticker responds HTTP 200"
+                },
+                "ticker payload is BTCUSDT with a positive price": {
+                    "path": "::ticker payload is BTCUSDT with a positive price",
+                    "id": "e62cff75814a3aa63f2a20183110ae6e",
+                    "passes": 1801,
+                    "fails": 0,
+                    "name": "ticker payload is BTCUSDT with a positive price"
+                }
+            }
+    },
+    "metrics": {
+        "http_req_receiving": {
+            "p(90)": 0.5212000000000001,
+            "p(95)": 0.6289849999999992,
+            "avg": 0.18578479467258605,
+            "min": 0,
+            "med": 0,
+            "max": 126.8667
+        },
+        "ticker_status": {
+            "rate": 3.0007372108211436,
+            "count": 1801
+        },
+        "checks": {
+            "fails": 0,
+            "passes": 3602,
+            "thresholds": {
+                "rate>0.99": false
+            },
+            "value": 1
+        },
+        "http_req_duration": {
+            "p(90)": 6.913900000000003,
+            "p(95)": 10.125529999999982,
+            "avg": 7.889677524972253,
+            "min": 1.5896,
+            "med": 3.86675,
+            "max": 663.6302,
+            "thresholds": {
+                "p(95)<750": false,
+                "p(99)<1500": false
+            }
+        },
+        "http_req_tls_handshaking": {
+            "p(95)": 0,
+            "avg": 0,
+            "min": 0,
+            "med": 0,
+            "max": 0,
+            "p(90)": 0
+        },
+        "iterations": {
+            "count": 1801,
+            "rate": 3.0007372108211436
+        },
+        "data_sent": {
+            "rate": 273.1937136294894,
+            "count": 163967
+        },
+        "iteration_duration": {
+            "avg": 8.385571848972788,
+            "min": 1.5896,
+            "med": 4.1733,
+            "max": 664.411,
+            "p(90)": 7.3559,
+            "p(95)": 10.6137
+        },
+        "vus": {
+            "min": 0,
+            "max": 1,
+            "value": 0
+        },
+        "http_reqs": {
+            "count": 1802,
+            "rate": 3.0024033614101615
+        },
+        "http_req_failed": {
+            "fails": 1802,
+            "passes": 0,
+            "thresholds": {
+                "rate<0.01": false
+            },
+            "value": 0
+        },
+        "http_req_waiting": {
+            "med": 3.8072,
+            "max": 663.0858,
+            "p(90)": 6.81803,
+            "p(95)": 9.970789999999997,
+            "avg": 7.575202774694788,
+            "min": 1.1362
+        },
+        "http_req_blocked": {
+            "med": 0,
+            "max": 5.1027,
+            "p(90)": 0,
+            "p(95)": 0,
+            "avg": 0.005969866814650387,
+            "min": 0
+        },
+        "data_received": {
+            "count": 450526,
+            "rate": 750.6441602678549
+        },
+        "http_req_connecting": {
+            "max": 2.815,
+            "p(90)": 0,
+            "p(95)": 0,
+            "avg": 0.0024318534961154273,
+            "min": 0,
+            "med": 0
+        },
+        "vus_max": {
+            "max": 2,
+            "value": 2,
+            "min": 2
+        },
+        "http_req_duration{expected_response:true}": {
+            "avg": 7.889677524972253,
+            "min": 1.5896,
+            "med": 3.86675,
+            "max": 663.6302,
+            "p(90)": 6.913900000000003,
+            "p(95)": 10.125529999999982
+        },
+        "http_req_sending": {
+            "avg": 0.12868995560488347,
+            "min": 0,
+            "med": 0,
+            "max": 215.8711,
+            "p(90)": 0,
+            "p(95)": 0
+        }
+    },
+    "setup_data": {
+        "startedAt": "2026-11-01T22:56:08.914Z"
+    }
+}

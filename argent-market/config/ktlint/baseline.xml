@@ -1,0 +1,47 @@
+<?xml version="1.0" encoding="utf-8"?>
+<baseline version="1.0">
+    <file name="src/main/kotlin/com/argent/market/MarketDataService.kt">
+        <error line="67" column="1" source="standard:max-line-length" />
+        <error line="135" column="1" source="standard:max-line-length" />
+        <error line="275" column="1" source="standard:max-line-length" />
+        <error line="354" column="1" source="standard:max-line-length" />
+        <error line="407" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/main/kotlin/com/argent/market/MarketFeedModels.kt">
+        <error line="8" column="1" source="standard:max-line-length" />
+    </file>
+    <file name="src/test/kotlin/com/argent/market/CandleAggregatorTest.kt">
+        <error line="15" column="1" source="standard:max-line-length" />
+        <error line="15" column="22" source="standard:multiline-expression-wrapping" />
+        <error line="15" column="40" source="standard:argument-list-wrapping" />
+        <error line="15" column="53" source="standard:argument-list-wrapping" />
+        <error line="15" column="64" source="standard:argument-list-wrapping" />
+        <error line="15" column="70" source="standard:argument-list-wrapping" />
+        <error line="15" column="89" source="standard:argument-list-wrapping" />
+        <error line="15" column="106" source="standard:argument-list-wrapping" />
+        <error line="15" column="132" source="standard:argument-list-wrapping" />
+        <error line="15" column="133" source="standard:argument-list-wrapping" />
+        <error line="43" column="30" source="standard:wrapping" />
+        <error line="43" column="30" source="standard:argument-list-wrapping" />
+        <error line="43" column="41" source="standard:argument-list-wrapping" />
+        <error line="43" column="68" source="standard:argument-list-wrapping" />
+        <error line="44" column="38" source="standard:argument-list-wrapping" />
+        <error line="44" column="80" source="standard:wrapping" />
+        <error line="44" column="81" source="standard:argument-list-wrapping" />
+        <error line="44" column="81" source="standard:trailing-comma-on-call-site" />
+        <error line="44" column="82" source="standard:trailing-comma-on-call-site" />
+        <error line="47" column="26" source="standard:multiline-expression-wrapping" />
+        <error line="48" column="111" source="standard:trailing-comma-on-call-site" />
+    </file>
+    <file name="src/test/kotlin/com/argent/market/MarketDataServiceTest.kt">
+        <error line="3" column="1" source="standard:import-ordering" />
+        <error line="22" column="110" source="standard:trailing-comma-on-call-site" />
+        <error line="23" column="14" source="standard:trailing-comma-on-call-site" />
+        <error line="49" column="40" source="standard:multiline-expression-wrapping" />
+        <error line="49" column="40" source="standard:wrapping" />
+        <error line="49" column="58" source="standard:multiline-expression-wrapping" />
+        <error line="51" column="76" source="standard:trailing-comma-on-call-site" />
+        <error line="52" column="13" source="standard:wrapping" />
+        <error line="80" column="23" source="standard:multiline-expression-wrapping" />
+    </file>
+</baseline>

@@ -149,7 +149,13 @@ internal fun TradingDesk(
         launch {
             if (!guestMode) {
                 api.orderUpdatesFlow().collect { update ->
-                    flash = "Emir güncellemesi · ${'$'}{update.orderId.take(8)} · ${'$'}{update.status} · ${'$'}{update.symbol}"
+                    flash =
+                        listOf(
+                            "Emir güncellemesi",
+                            update.orderId.take(8),
+                            update.status,
+                            update.symbol,
+                        ).joinToString(" · ")
                 }
             }
         }
@@ -260,7 +266,9 @@ internal fun TradingDesk(
                                 orderRequestFingerprint = null
                                 orderRequestId = UUID.randomUUID().toString()
                             } catch (error: Exception) {
-                                flash = error.message ?: "Emir gönderilemedi; aynı emir anahtarıyla yeniden deneyebilirsin."
+                                flash =
+                                    error.message
+                                        ?: "Emir gönderilemedi; aynı emir anahtarıyla yeniden deneyebilirsin."
                             } finally {
                                 orderSubmitting = false
                             }
@@ -274,13 +282,29 @@ internal fun TradingDesk(
                 settingsOpen = false
             }, onSettingsPreview, onLanguagePreview, onSettingsCancel, onSettingsSave)
         }
-        BottomDock(tab, {
-            tab = it
-        }, bottomDockHeight, {
-            bottomDockHeight = it
-        }, portfolio, orders, fills, blotter, tickers, api, me, symbol, side, type, qty, price, scope, marketRefreshSeconds, guestMode, onRequireLogin = {
-            flash = loginRequiredMessage
-        }) { flash = it }
+        BottomDock(
+            tab = tab,
+            onTab = { tab = it },
+            height = bottomDockHeight,
+            onHeightChange = { bottomDockHeight = it },
+            portfolio = portfolio,
+            orders = orders,
+            fills = fills,
+            blotter = blotter,
+            tickers = tickers,
+            api = api,
+            me = me,
+            selectedSymbol = symbol,
+            draftSide = side,
+            draftType = type,
+            draftQuantity = qty,
+            draftPrice = price,
+            scope = scope,
+            marketRefreshSeconds = marketRefreshSeconds,
+            guestMode = guestMode,
+            onRequireLogin = { flash = loginRequiredMessage },
+            onFlash = { flash = it },
+        )
     }
 }
 

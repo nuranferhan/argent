@@ -93,9 +93,10 @@ internal fun ChartPanel(
         }
         Spacer(Modifier.height(8.dp))
         val pointSnapshot = points.toList()
-        val safePoints = pointSnapshot.ifEmpty {
-            listOfNotNull(ticker?.price?.toFloatOrNull()?.takeIf(Float::isFinite))
-        }
+        val safePoints =
+            pointSnapshot.ifEmpty {
+                listOfNotNull(ticker?.price?.toFloatOrNull()?.takeIf(Float::isFinite))
+            }
         val chartScale = remember(safePoints) { ChartGeometry.scale(safePoints) }
         val axisValues = chartScale.axisValues
         Row(Modifier.weight(1f).fillMaxWidth(), verticalAlignment = Alignment.CenterVertically) {

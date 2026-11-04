@@ -1,7 +1,7 @@
 package com.argent.android
 
-import androidx.compose.foundation.background
 import androidx.compose.foundation.Canvas
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -16,6 +16,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.geometry.Offset
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.drawscope.Stroke
@@ -43,7 +44,7 @@ internal fun PriceChart(
                         String.format(Locale.US, "%.2f", it),
                         color = Color(0xFFBAC4D1),
                         fontSize = 9.sp,
-                        fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                        fontFamily = FontFamily.Monospace,
                         maxLines = 1,
                     )
                 }
@@ -51,14 +52,23 @@ internal fun PriceChart(
             Canvas(Modifier.weight(1f).fillMaxHeight()) {
                 repeat(axisValues.size) { index ->
                     val y = size.height * index / (axisValues.size - 1).coerceAtLeast(1)
-                    drawLine(Line, androidx.compose.ui.geometry.Offset(0f, y), androidx.compose.ui.geometry.Offset(size.width, y))
+                    drawLine(
+                        Line,
+                        Offset(0f, y),
+                        Offset(size.width, y),
+                    )
                 }
                 val normalized = chartScale.normalized
                 when (normalized.size) {
                     0 -> Unit
                     1 -> {
                         val y = size.height * (1f - normalized.single())
-                        drawLine(Gold, androidx.compose.ui.geometry.Offset(0f, y), androidx.compose.ui.geometry.Offset(size.width, y), strokeWidth = 2.5f)
+                        drawLine(
+                            Gold,
+                            Offset(0f, y),
+                            Offset(size.width, y),
+                            strokeWidth = 2.5f,
+                        )
                     }
                     else -> {
                         val path = Path()
@@ -78,7 +88,7 @@ internal fun PriceChart(
                     label.toString(),
                     color = Muted,
                     fontSize = 8.sp,
-                    fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace,
+                    fontFamily = FontFamily.Monospace,
                 )
             }
         }

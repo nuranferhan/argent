@@ -54,9 +54,9 @@ subprojects {
         "implementation"(platform("io.netty:netty-bom:4.1.137.Final"))
         "testImplementation"("org.jetbrains.kotlin:kotlin-test")
         "testImplementation"("org.jetbrains.kotlinx:kotlinx-coroutines-test:1.9.0")
-        "testImplementation"("io.kotest:kotest-runner-junit5:5.9.1")
-        "testImplementation"("io.kotest:kotest-assertions-core:5.9.1")
-        "testImplementation"("io.kotest:kotest-property:5.9.1")
+        "testImplementation"("io.kotest:kotest-runner-junit5:6.2.6")
+        "testImplementation"("io.kotest:kotest-assertions-core:6.2.6")
+        "testImplementation"("io.kotest:kotest-property:6.2.6")
         "testImplementation"("org.junit.jupiter:junit-jupiter:5.11.3")
     }
 
